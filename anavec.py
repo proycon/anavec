@@ -6,11 +6,12 @@ from collections import defaultdict
 import theano
 import theano.tensor as T
 import numpy as np
+import Levenshtein
 import colibricore
 
 
 UNKFEATURE = -1
-PUNCTFEATURE = -1
+PUNCTFEATURE = -2
 
 
 def compute(trainingdata, testdata):
@@ -56,6 +57,25 @@ def buildfeaturevector(word, alphabetmap, numfeatures, args):
     return featurevector
 
 
+def anahash(word, alphabetmap, numfeatures):
+    hashvalue = 0
+    for char in word:
+        if not char.isalnum():
+            charvalue = 100 + numfeatures + PUNCTFEATURE
+        elif char in alphabetmap:
+            charvalue = 100 + alphabetmap[char]
+        else:
+            charvalue = 100 + numfeatures + UNKFEATURE
+        hashvalue += charvalue**5
+    return hashvalue
+
+def anahash_fromvector(vector):
+    hashvalue = 0
+    for i, count in enumerate(vector):
+        hashvalue += count * ((100+i)**5)
+    return hashvalue
+
+
 def main():
     parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of background corpus (training data)", action='store',default="",required=True)
@@ -84,6 +104,7 @@ def main():
 
     alphabet = set()
 
+
     numtraining = 0 #number of word types
     print("Computing alphabet on training data...",file=sys.stderr)
     for pattern in patternmodel:
@@ -95,7 +116,7 @@ def main():
                     alphabet.add(char)
 
 
-    #maps each character to a feature number
+    #maps each character to a feature number (order number)
     alphabetmap = {}
     for i, char in enumerate(sorted(alphabet)):
         alphabetmap[char] = i
@@ -108,41 +129,64 @@ def main():
     testdata = np.array( [ buildfeaturevector(testword, alphabetmap, numfeatures, args ) for testword in testwords] )
     if args.debug: print("[DEBUG] TEST DATA: ", testdata)
 
-    print("Building training vectors...", file=sys.stderr)
+    print("Building training vectors and counting anagram hashes...", file=sys.stderr)
     trainingdata = np.empty((numtraining, numfeatures), dtype=np.int8)
+
+
+    anahashcount = defaultdict(int) #frequency count of all seen anahashes (uses to determine which are actual anagrams in the training data)
 
     instanceindex = 0
     for pattern in patternmodel:
         if len(pattern) == 1: #only unigrams for now
-            trainingdata[instanceindex] = buildfeaturevector(pattern.tostring(classdecoder), alphabetmap, numfeatures, args)
+            word = pattern.tostring(classdecoder)
+            h = anahash(word, alphabetmap, numfeatures)
+            anahashcount[h] += 1
+            trainingdata[instanceindex] = buildfeaturevector(word, alphabetmap, numfeatures, args) #TODO: words that are anagrams are duplicated in training data now, doesn't hurt but sligtly less efficient, but otherwise precomputed matrix size is has gaps
             instanceindex  += 1
 
-    if args.debug: print("[DEBUG] TRAINING DATA: ", trainingdata)
+    if args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", trainingdata.shape)
 
     print("Computing matches...", file=sys.stderr)
     bestindices = compute(trainingdata, testdata)
 
     print("Resolving results...", file=sys.stderr)
-    bestindexmap = defaultdict(set)
+
+    matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
     for bestindex, testword in zip(bestindices, testwords):
-        bestindexmap[bestindex].add(testword)
+        h = anahash_fromvector(trainingdata[bestindex])
+        matchinganagramhashes[h].add(testword)
 
-    solutions = {} #maps test words to solutions (the best match)... (strings for now)
+    solutions = defaultdict(list) #maps test words to solutions (the best match)
 
-    instanceindex = 0
     for pattern in patternmodel:
         if len(pattern) == 1: #only unigrams for now
-            if instanceindex in bestindexmap:
-                #TODO: this is the place for extra score computation and thresholding
-                for testword in bestindexmap[instanceindex]:
-                    solutions[testword] = pattern.tostring(classdecoder)
-            instanceindex += 1
+            trainingword = pattern.tostring(classdecoder)
+            h = anahash(trainingword, alphabetmap, numfeatures)
+            if h in matchinganagramhashes:
+                for testword in matchinganagramhashes[h]:
+                    solutions[testword].append(trainingword)
 
-    print("Outputting...", file=sys.stderr)
+    print("Consolidating and outputting...", file=sys.stderr)
     #output in same order as input
     for testword in testwords:
-        print(testword + "\t" + solutions[testword])
+        if len(solutions[testword]) == 1:
+            #only one solution
+            print(testword + "\t" + solutions[testword][0] + "\t1.0")
+        else:
+            #we have multiple solutions; we are going to use sources to disambiguate:
+            #   1) the levensthein distance
+            #   2) the frequency in the training corpus
+            solutions_extended = [ (solution, Levenshtein.distance(testword, solution), patternmodel[classencoder.buildpattern(solution)]) for solution in solutions[testword] ]
+            distancesum = sum((  distance for _, distance, _ in solutions_extended ))
+            freqsum = sum(( freq for _, _, freq in solutions_extended ))
+            #compute a normalize compound score including both components:
+            solutions_scored = [ ( solution, ((distance / distancesum) + (freq / freqsum)) / 2.0 ) for solution, distance, freq in solutions_extended ]
 
+            #output solutions:
+            print(testword, end="")
+            for solution, score in sorted(solutions_scored, key=lambda x: -1 * x[1]):
+                print("\t" + solution + "\t" + str(score),end="")
+            print()
 
 if __name__ == '__main__':
     main()
