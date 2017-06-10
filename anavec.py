@@ -104,6 +104,13 @@ def timer(begintime):
     duration = time.time() - begintime
     print(" ^-- took " + str(round(duration,5)) + ' s', file=sys.stderr)
 
+class AttributeDict(dict):
+    def __getattr__(self, attr):
+        return self[attr]
+
+    def __setattr__(self, attr, value):
+        self[attr] = value
+
 def main():
     parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of a background corpus (training data; Colibri Core unindexed patternmodel)", action='store',required=True)
@@ -124,6 +131,10 @@ def main():
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('-d', '--debug',action='store_true')
     args = parser.parse_args()
+    anavec(**vars(args))
+
+def anavec(**args):
+    args = AttributeDict(args)
 
     if not args.lexicon:
         print("WARNING: You did not provide a lexicon! This will have a strong negative effect on the results!")
