@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 from collections import defaultdict
+import time
 import itertools
 import theano
 import theano.tensor as T
@@ -99,6 +100,10 @@ def trainingpatterns(patternmodel, lexicon, minfreq):
         if len(pattern) == 1: #only unigrams for now
             yield pattern
 
+def timer(begintime):
+    duration = time.time() - begintime
+    print(" ^-- took " + str(round(duration,5)) + ' s', file=sys.stderr)
+
 def main():
     parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of a background corpus (training data; Colibri Core unindexed patternmodel)", action='store',required=True)
@@ -156,8 +161,13 @@ def main():
     numtest = len(testwords)
     print("Test set size: ", numtest, file=sys.stderr)
 
+    print("Loading background corpus from " + args.patternmodel, file=sys.stderr)
+    begintime = time.time()
     classencoder= colibricore.ClassEncoder(args.classfile)
     patternmodel = colibricore.UnindexedPatternModel(args.patternmodel)
+    timer(begintime)
+
+    print("Loading lexicon... ", numtest, file=sys.stderr)
     lexicon = colibricore.UnindexedPatternModel()
     if args.lexicon:
         with open(args.lexicon,'r',encoding='utf-8') as f:
@@ -175,11 +185,13 @@ def main():
 
 
     print("Computing alphabet on training data...",file=sys.stderr)
+    begintime = time.time()
     for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
         word = pattern.tostring(classdecoder) #string representation
         for char in word:
             if char.isalpha():
                 alphabet[char] += 1
+    timer(begintime)
     if args.debug: print("[DEBUG] Alphabet count: ", alphabet)
 
 
@@ -204,19 +216,22 @@ def main():
     anahashcount = defaultdict(int) #frequency count of all seen anahashes (uses to determine which are actual anagrams in the training data)
 
     print("Counting anagrams in training data", file=sys.stderr)
+    begintime = time.time()
     for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
         word = pattern.tostring(classdecoder)
         h = anahash(word, alphabetmap, numfeatures)
         anahashcount[h] += 1
         if anahashcount[h] == 1:
             numtraining += 1
+    timer(begintime)
 
+    print("Training set size (anagram vectors): ", numtraining, file=sys.stderr)
+    print("Background corpus size (patterns): ", len(patternmodel), file=sys.stderr)
+    print("Lexicon size (patterns): ", len(lexicon), file=sys.stderr)
 
     print("Building training vectors and counting anagram hashes...", file=sys.stderr)
+    begintime = time.time()
     trainingdata = np.empty((numtraining, numfeatures), dtype=np.int8)
-
-
-
     instanceindex = 0
     for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
         word = pattern.tostring(classdecoder)
@@ -225,13 +240,16 @@ def main():
             anahashcount[h] = anahashcount[h] * -1  #flip sign to indicate we visited this anagram already, prevent duplicates in training data
             trainingdata[instanceindex] = buildfeaturevector(word, alphabetmap, numfeatures, args)
             instanceindex  += 1
-
+    timer(begintime)
     if args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", trainingdata.shape)
 
     print("Computing vector distances between test and trainingdata...", file=sys.stderr)
+    begintime = time.time()
     distancematrix = compute_vector_distances(trainingdata, testdata)
+    timer(begintime)
 
     print("Collecting matching anagrams", file=sys.stderr)
+    begintime = time.time()
     matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
     for i, (testword, distances) in enumerate(zip(testwords, distancematrix)):
         #distances contains the distances between testword and all training instances
@@ -241,18 +259,21 @@ def main():
                 break
             h = anahash_fromvector(trainingdata[trainingindex])
             matchinganagramhashes[h].add((testword, distance))
+    timer(begintime)
 
     print("Resolving anagram hashes to candidates", file=sys.stderr)
+    begintime = time.time()
     candidates = defaultdict(list) #maps test words to  candidates (str => [str])
-
     for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
         trainingword = pattern.tostring(classdecoder)
         h = anahash(trainingword, alphabetmap, numfeatures)
         if h in matchinganagramhashes:
             for testword, vectordistance in matchinganagramhashes[h]:
                 candidates[testword].append((trainingword,vectordistance))
+    timer(begintime)
 
     print("Ranking candidates...", file=sys.stderr)
+    begintime = time.time()
     results = []
     #output in same order as input
     for testword in testwords:
@@ -284,6 +305,7 @@ def main():
 
         result = {'text': testword, 'candidates': result_candidates}
         results.append(result)
+    timer(begintime)
 
     if args.json:
         print("Outputting JSON...", file=sys.stderr)
@@ -294,8 +316,6 @@ def main():
             print(result['text'])
             for candidate in result['candidates']:
                 print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + "]")
-
-
 
 
     return results
