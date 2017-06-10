@@ -6,6 +6,7 @@ from collections import defaultdict
 import theano
 import theano.tensor as T
 import numpy as np
+import json
 import Levenshtein
 import colibricore
 
@@ -82,9 +83,12 @@ def main():
     parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of background corpus (training data)", action='store',default="",required=True)
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',default="",required=True)
-    parser.add_argument('-u','--unkweight', type=float,help="Unknown character weight", action='store',default=1,required=False)
-    parser.add_argument('-p','--punctweight', type=float,help="Punctuation character weight", action='store',default=1,required=False)
     parser.add_argument('-k','--neighbours','--neighbors', type=float,help="Maximum number of neighbours to extract", action='store',default=20,required=False)
+    parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
+    parser.add_argument('-f','--minfreq', type=int,help="Minimum frequency (occurrence count) in background corpus", action='store',default=1,required=False)
+    parser.add_argument('-p','--punctweight', type=int,help="Punctuation character weight", action='store',default=1,required=False)
+    parser.add_argument('-u','--unkweight', type=int,help="Unknown character weight", action='store',default=1,required=False)
+    parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('-d', '--debug',action='store_true')
     args = parser.parse_args()
 
@@ -161,40 +165,59 @@ def main():
             if n == args.neighbours:
                 break
             h = anahash_fromvector(trainingdata[trainingindex])
-            matchinganagramhashes[h].add(testword)
+            matchinganagramhashes[h].add((testword, distance))
 
     print("Resolving anagram hashes to candidates", file=sys.stderr)
-    solutions = defaultdict(list) #maps test words to solutions (str => [str])
+    candidates = defaultdict(list) #maps test words to  candidates (str => [str])
 
     for pattern in patternmodel:
         if len(pattern) == 1: #only unigrams for now
             trainingword = pattern.tostring(classdecoder)
             h = anahash(trainingword, alphabetmap, numfeatures)
             if h in matchinganagramhashes:
-                for testword in matchinganagramhashes[h]:
-                    solutions[testword].append(trainingword)
+                for testword, vectordistance in matchinganagramhashes[h]:
+                    candidates[testword].append((trainingword,vectordistance))
 
-    print("Consolidating and outputting...", file=sys.stderr)
+    print("Ranking candidates...", file=sys.stderr)
+    results = []
     #output in same order as input
     for testword in testwords:
-        if len(solutions[testword]) == 1:
-            #only one solution
-            print(testword + "\t" + solutions[testword][0] + "\t1.0")
-        else:
-            #we have multiple solutions; we are going to use sources to disambiguate:
-            #   1) the levensthein distance
-            #   2) the frequency in the training corpus
-            solutions_extended = [ (solution, Levenshtein.distance(testword, solution), patternmodel[classencoder.buildpattern(solution)]) for solution in solutions[testword] ]
-            distancesum = sum((  distance for _, distance, _ in solutions_extended ))
-            freqsum = sum(( freq for _, _, freq in solutions_extended ))
+        #we have multiple candidates per testword; we are going to use three sources to disambiguate:
+        #   1) the vector distance
+        #   2) the levensthein distance
+        #   3) the frequency in the background corpus
+        candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), patternmodel[classencoder.buildpattern(candidate)]) for candidate, vdistance in candidates[testword] ]
+        #prune candidates below thresholds:
+        candidates_extended = [ (candidate, vdistance, ldistance, freq) for candidate, vdistance, ldistance,freq in candidates_extended if ldistance <= args.maxld and freq >= args.minfreq ]
+        result_candidates = []
+        if candidates_extended:
+            ldistancesum = sum((  distance for _, _, ldistance, _ in candidates_extended ))
+            freqsum = sum(( freq for _, _, _, freq in candidates_extended ))
             #compute a normalize compound score including both components:
-            solutions_scored = [ ( solution, ((distance / distancesum) + (freq / freqsum)) / 2.0 ) for solution, distance, freq in solutions_extended ]
+            candidates_scored = [ ( candidate, ((distance / ldistancesum) + (freq / freqsum)) / 2.0, vdistance, ldistance, freq ) for candidate, vdistance, ldistance, freq in candidates_extended ]
 
-            #output solutions:
-            print(testword, end="")
-            for solution, score in sorted(solutions_scored, key=lambda x: -1 * x[1]):
-                print("\t" + solution + "\t" + str(score),end="")
+            #output candidates:
+            for candidate, score, vdistance, ldistance,freq in sorted(candidates_scored, key=lambda x: -1 * x[1]):
+                result_candidates.append( {'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq } )
+
+        result = {'text': testword, 'candidates': result_candidates}
+        results.append(result)
+
+    if args.json:
+        print("Outputting JSON...", file=sys.stderr)
+        print(json.dumps(results))
+    else:
+        print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
+        for result in results:
+            print(result['text'],end="")
+            for candidate in result['candidates']:
+                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + "]",end="")
             print()
+
+
+
+
+    return results
 
 if __name__ == '__main__':
     main()
