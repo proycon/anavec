@@ -108,6 +108,7 @@ def main():
     parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
+    parser.add_argument('-a','--alphafreq', type=int,help="Minimum alphabet frequency threshold (occurrence count); characters occuring less are not considered in the anagram vectors", action='store',default=10,required=False)
     parser.add_argument('--lexfreq', type=int,help="Artificial frequency (occurrence count) for items in the lexicon that are not in the background corpus", action='store',default=1,required=False)
     parser.add_argument('--ldweight', type=float,help="Levenshtein distance weight for candidating ranking", action='store',default=1,required=False)
     parser.add_argument('--vdweight', type=float,help="Vector distance weight for candidating ranking", action='store',default=1,required=False)
@@ -170,24 +171,28 @@ def main():
         classdecoder = colibricore.ClassDecoder(args.classfile + '.extended')
     else:
         classdecoder = colibricore.ClassDecoder(args.classfile)
-    alphabet = set()
+    alphabet = defaultdict(int)
 
 
     print("Computing alphabet on training data...",file=sys.stderr)
     for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
         word = pattern.tostring(classdecoder) #string representation
         for char in word:
-            if char.isalpha() and char not in alphabet:
-                alphabet.add(char)
+            if char.isalpha():
+                alphabet[char] += 1
+    if args.debug: print("[DEBUG] Alphabet count: ", alphabet)
 
 
     #maps each character to a feature number (order number)
     alphabetmap = {}
-    for i, char in enumerate(sorted(alphabet)):
-        alphabetmap[char] = i
+    alphabetsize = 0
+    for i, (char, freq) in enumerate(sorted(alphabet.items())):
+        if freq >= args.alphafreq:
+            alphabetmap[char] = alphabetsize
+            alphabetsize += 1
 
-    print("Alphabet computed (size=" + str(len(alphabet))+"): ", alphabet, file=sys.stderr)
-    numfeatures = len(alphabet) + 2 #UNK feature, PUNCT feature
+    print("Alphabet computed (size=" + str(alphabetsize)+"): ", list(sorted(alphabetmap.keys())), file=sys.stderr)
+    numfeatures = alphabetsize + 2 #UNK feature, PUNCT feature
     if args.debug: print(alphabetmap)
 
     print("Building test vectors...", file=sys.stderr)
