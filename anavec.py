@@ -139,7 +139,7 @@ def main():
         print("Error: Pattern model file " + args.patternmodel + " does not exist",file=sys.stderr)
         sys.exit(2)
 
-    print("Normalized weights using in candidate ranking:", file=sys.stderr)
+    print("Normalized weights used in candidate ranking:", file=sys.stderr)
     totalweight = args.ldweight + args.vdweight + args.freqweight + args.lexweight
     args.vdweight = args.vdweight / totalweight
     args.ldweight = args.ldweight / totalweight
