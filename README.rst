@@ -32,6 +32,16 @@ This software is written in Python 3 and employs various third-party modules imp
 * `Numpy <http://www.numpy.org>`_
 * `Python-Levenshtein <https://github.com/ztane/python-Levenshtein/>`_.
 
+Installation
+---------------
+
+Stable version from the Python Package Index (**not available yet**):
+* ``pip install anavec``
+
+Latest version from github (https://github.com/proycon/anavec):
+* Clone this repository
+* ``python3 setup.py install``
+
 License
 ----------
 
