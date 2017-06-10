@@ -33,18 +33,19 @@ def compute_vector_distances(trainingdata, testdata):
     yL2SM = T.zeros((n, m)) + yL2S # # broadcasting, [n, m]
     squaredPairwiseDistances = xL2SM.T + yL2SM - 2.0*T.dot(x, y.T) # [n, m]
 
-    lamblinsTrick = False
+    #lamblinsTrick = False
 
-    if lamblinsTrick:
-        s = squaredPairwiseDistances
-        bestIndices = T.cast( ( T.arange(n).dimshuffle(0, 'x') * T.cast(T.eq(s, s.min(axis=0, keepdims=True)), 'float32') ).sum(axis=0), 'int32')
-    else:
-        bestIndices = T.argmin(squaredPairwiseDistances, axis=0)
+    #if lamblinsTrick:
+    #    s = squaredPairwiseDistances
+    #    bestIndices = T.cast( ( T.arange(n).dimshuffle(0, 'x') * T.cast(T.eq(s, s.min(axis=0, keepdims=True)), 'float32') ).sum(axis=0), 'int32')
+    #else:
+    #    bestIndices = T.argmin(squaredPairwiseDistances, axis=0)
+    #nearests_fn = theano.function([x, y], bestIndices, profile=False)
+    #return nearests_fn(trainingdata, testdata)
 
     squaredpwdist_fn = theano.function([x, y], T.transpose(squaredPairwiseDistances), profile=False)
-    #nearests_fn = theano.function([x, y], bestIndices, profile=False)
 
-    #return nearests_fn(trainingdata, testdata)
+
     return squaredpwdist_fn(trainingdata, testdata)
 
 
