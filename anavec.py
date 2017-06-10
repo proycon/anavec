@@ -127,7 +127,7 @@ def main():
         sys.exit(2)
 
     print("Normalized weights using in candidate ranking:", file=sys.stderr)
-    totalweight = args.ldweight + args.vdweight + args.freqweigth + args.lexweight
+    totalweight = args.ldweight + args.vdweight + args.freqweight + args.lexweight
     print(" Vector distance weight: ", args.vdweight / totalweight, file=sys.stderr)
     print(" Levenshtein distance weight: ", args.ldweight / totalweight, file=sys.stderr)
     print(" Frequency weight: ", args.freqweight / totalweight, file=sys.stderr)
@@ -139,15 +139,15 @@ def main():
     numtest = len(testwords)
     print("Test set size: ", numtest, file=sys.stderr)
 
-    classencoder= colibricore.ClassEncoder(args.classfile, autoaddunknown=True)
+    classencoder= colibricore.ClassEncoder(args.classfile)
     patternmodel = colibricore.UnindexedPatternModel(args.patternmodel)
-    lexicon = colibricore.UnindexedPatternmodel()
+    lexicon = colibricore.UnindexedPatternModel()
     if args.lexicon:
         with open(args.lexicon,'r',encoding='utf-8') as f:
             for word in f:
                 word = word.strip()
                 if word:
-                    classencoder.buildpattern(word) #adds lexicon words to the classencoder if they don't exist yet
+                    classencoder.buildpattern(word, autoaddunknown=True) #adds lexicon words to the classencoder if they don't exist yet
                     lexicon.add(word)
 
         classencoder.save(args.classfile + '.extended')
@@ -205,8 +205,8 @@ def main():
             h = anahash(word, alphabetmap, numfeatures)
             if anahashcount[h] >= 1:
                 anahashcount[h] = anahashcount[h] * -1  #flip sign to indicate we visited this anagram already, prevent duplicates in training data
-            trainingdata[instanceindex] = buildfeaturevector(word, alphabetmap, numfeatures, args)
-            instanceindex  += 1
+                trainingdata[instanceindex] = buildfeaturevector(word, alphabetmap, numfeatures, args)
+                instanceindex  += 1
 
     if args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", trainingdata.shape)
 
@@ -244,7 +244,7 @@ def main():
         #   2) the levensthein distance
         #   3) the frequency in the background corpus
         #   4) the presence in lexicon or not
-        candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), getfrequencytuple(candidate, patternmodel, lexicon, args.lexfreq)) for candidate, vdistance in candidates[testword] ]
+        candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), getfrequencytuple(candidate, patternmodel, lexicon, classencoder, args.lexfreq)) for candidate, vdistance in candidates[testword] ]
         #prune candidates below thresholds:
         candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= args.maxld and freqtuple[0] >= args.minfreq ]
         result_candidates = []
@@ -255,16 +255,16 @@ def main():
 
             #compute a normalize compound score including all components according to their weights:
             candidates_scored = [ ( candidate, (
-                args.vdweight * (1.0-(distance/vdistancesum)) + \
-                args.ldweight * (1.0-(distance/ldistancesum)) + \
+                args.vdweight * (1.0-(vdistance/vdistancesum)) + \
+                args.ldweight * (1.0-(ldistance/ldistancesum)) + \
                 args.freqweight * (freq/freqsum) + \
                 (args.lexweight if inlexicon else 0)
                 ) / (args.vdweight + args.ldweight + args.freqweight + args.lexweight)
-            ) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
+            ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
 
             #output candidates:
-            for candidate, score, vdistance, ldistance,freq in sorted(candidates_scored, key=lambda x: -1 * x[1]):
-                result_candidates.append( {'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq } )
+            for candidate, score, vdistance, ldistance,freq, inlexicon in sorted(candidates_scored, key=lambda x: -1 * x[1]):
+                result_candidates.append( {'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon } )
 
         result = {'text': testword, 'candidates': result_candidates}
         results.append(result)
@@ -277,7 +277,7 @@ def main():
         for result in results:
             print(result['text'],end="")
             for candidate in result['candidates']:
-                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + "]",end="")
+                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + "]",end="")
             print()
 
 
