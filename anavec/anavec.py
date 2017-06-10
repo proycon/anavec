@@ -111,8 +111,7 @@ class AttributeDict(dict):
     def __setattr__(self, attr, value):
         self[attr] = value
 
-def main():
-    parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+def setup_argparser(parser):
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of a background corpus (training data; Colibri Core unindexed patternmodel)", action='store',required=True)
     parser.add_argument('-l','--lexicon', type=str,help="Lexicon file (training data; plain text, one word per line)", action='store',required=False)
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',required=True)
@@ -129,11 +128,17 @@ def main():
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--json',action='store_true', help="Output JSON")
+    parser.add_argument('--noout',dest='output',action='store_false', help="Do not output")
     parser.add_argument('-d', '--debug',action='store_true')
-    args = parser.parse_args()
-    anavec(**vars(args))
 
-def anavec(**args):
+
+def main():
+    parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    setup_argparser(parser)
+    args = parser.parse_args()
+    run(**vars(args))
+
+def run(*testwords, **args):
     args = AttributeDict(args)
 
     if not args.lexicon:
@@ -166,8 +171,9 @@ def anavec(**args):
     print(" Frequency weight: ", args.freqweight, file=sys.stderr)
     print(" Lexicon weight: ", args.lexweight, file=sys.stderr)
 
-    print("Test input words, one per line (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
-    testwords = [ w.strip() for w in sys.stdin.readlines() ]
+    if not testwords:
+        print("Test input words, one per line (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
+        testwords = [ w.strip() for w in sys.stdin.readlines() ]
 
     numtest = len(testwords)
     print("Test set size: ", numtest, file=sys.stderr)
@@ -312,16 +318,16 @@ def anavec(**args):
             #output candidates:
             for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
                 if i == args.neighbours: break
-                result_candidates.append( {'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon } )
+                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon }) )
 
-        result = {'text': testword, 'candidates': result_candidates}
+        result = AttributeDict({'text': testword, 'candidates': result_candidates})
         results.append(result)
     timer(begintime)
 
     if args.json:
         print("Outputting JSON...", file=sys.stderr)
         print(json.dumps(results))
-    else:
+    elif args.output:
         print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
         for result in results:
             print(result['text'])
