@@ -90,12 +90,22 @@ def getfrequencytuple(candidate, patternmodel, lexicon, classencoder, lexfreq):
         return lexfreq, True
     return 0, False
 
+def trainingpatterns(patternmodel, lexicon, minfreq):
+    for pattern in patternmodel:
+        if len(pattern) == 1: #only unigrams for now
+            if patternmodel[pattern] > minfreq:
+                yield pattern
+    for pattern in lexicon:
+        if len(pattern) == 1: #only unigrams for now
+            yield pattern
+
 def main():
     parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of a background corpus (training data; Colibri Core unindexed patternmodel)", action='store',required=True)
     parser.add_argument('-l','--lexicon', type=str,help="Lexicon file (training data; plain text, one word per line)", action='store',required=False)
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',required=True)
-    parser.add_argument('-k','--neighbours','--neighbors', type=float,help="Maximum number of neighbours to consider", action='store',default=20,required=False)
+    parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram neighbours to consider", action='store',default=20,required=False)
+    parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
     parser.add_argument('--lexfreq', type=int,help="Artificial frequency (occurrence count) for items in the lexicon that are not in the background corpus", action='store',default=1,required=False)
@@ -111,12 +121,14 @@ def main():
 
     if not args.lexicon:
         print("WARNING: You did not provide a lexicon! This will have a strong negative effect on the results!")
-    elif os.path.exists(args.lexicon):
+    elif not os.path.exists(args.lexicon):
         print("Error: Lexicon file " + args.lexicon + " does not exist",file=sys.stderr)
         sys.exit(2)
 
     if args.lexfreq < args.minfreq:
         print("WARNING: Lexicon base frequency is smaller than minimum frequency!",file=sys.stderr)
+    if args.neighbours < args.topn:
+        print("WARNING: Neighbour threshold (-k) is lower than return candidate threshold (-n)!",file=sys.stderr)
 
 
     if not os.path.exists(args.classfile):
@@ -128,10 +140,14 @@ def main():
 
     print("Normalized weights using in candidate ranking:", file=sys.stderr)
     totalweight = args.ldweight + args.vdweight + args.freqweight + args.lexweight
-    print(" Vector distance weight: ", args.vdweight / totalweight, file=sys.stderr)
-    print(" Levenshtein distance weight: ", args.ldweight / totalweight, file=sys.stderr)
-    print(" Frequency weight: ", args.freqweight / totalweight, file=sys.stderr)
-    print(" Lexicon weight: ", args.lexweight / totalweight, file=sys.stderr)
+    args.vdweight = args.vdweight / totalweight
+    args.ldweight = args.ldweight / totalweight
+    args.freqweight = args.freqweight / totalweight
+    args.lexweight = args.lexweight / totalweight
+    print(" Vector distance weight: ", args.vdweight , file=sys.stderr)
+    print(" Levenshtein distance weight: ", args.ldweight, file=sys.stderr)
+    print(" Frequency weight: ", args.freqweight, file=sys.stderr)
+    print(" Lexicon weight: ", args.lexweight, file=sys.stderr)
 
     print("Test input words, one per line (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
     testwords = [ w.strip() for w in sys.stdin.readlines() ]
@@ -147,8 +163,8 @@ def main():
             for word in f:
                 word = word.strip()
                 if word:
-                    classencoder.buildpattern(word, autoaddunknown=True) #adds lexicon words to the classencoder if they don't exist yet
-                    lexicon.add(word)
+                    pattern = classencoder.buildpattern(word, autoaddunknown=True) #adds lexicon words to the classencoder if they don't exist yet
+                    lexicon.add(pattern)
 
         classencoder.save(args.classfile + '.extended')
         classdecoder = colibricore.ClassDecoder(args.classfile + '.extended')
@@ -158,12 +174,11 @@ def main():
 
 
     print("Computing alphabet on training data...",file=sys.stderr)
-    for pattern in itertools.chain(lexicon, patternmodel):
-        if len(pattern) == 1: #only unigrams for now
-            word = pattern.tostring(classdecoder) #string representation
-            for char in word:
-                if char.isalpha() and char not in alphabet:
-                    alphabet.add(char)
+    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
+        word = pattern.tostring(classdecoder) #string representation
+        for char in word:
+            if char.isalpha() and char not in alphabet:
+                alphabet.add(char)
 
 
     #maps each character to a feature number (order number)
@@ -184,13 +199,12 @@ def main():
     anahashcount = defaultdict(int) #frequency count of all seen anahashes (uses to determine which are actual anagrams in the training data)
 
     print("Counting anagrams in training data", file=sys.stderr)
-    for pattern in itertools.chain(lexicon, patternmodel):
-        if len(pattern) == 1: #only unigrams for now
-            word = pattern.tostring(classdecoder)
-            h = anahash(word, alphabetmap, numfeatures)
-            anahashcount[h] += 1
-            if anahashcount[h] == 1:
-                numtraining += 1
+    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
+        word = pattern.tostring(classdecoder)
+        h = anahash(word, alphabetmap, numfeatures)
+        anahashcount[h] += 1
+        if anahashcount[h] == 1:
+            numtraining += 1
 
 
     print("Building training vectors and counting anagram hashes...", file=sys.stderr)
@@ -199,14 +213,13 @@ def main():
 
 
     instanceindex = 0
-    for pattern in itertools.chain(lexicon, patternmodel):
-        if len(pattern) == 1: #only unigrams for now
-            word = pattern.tostring(classdecoder)
-            h = anahash(word, alphabetmap, numfeatures)
-            if anahashcount[h] >= 1:
-                anahashcount[h] = anahashcount[h] * -1  #flip sign to indicate we visited this anagram already, prevent duplicates in training data
-                trainingdata[instanceindex] = buildfeaturevector(word, alphabetmap, numfeatures, args)
-                instanceindex  += 1
+    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
+        word = pattern.tostring(classdecoder)
+        h = anahash(word, alphabetmap, numfeatures)
+        if anahashcount[h] >= 1:
+            anahashcount[h] = anahashcount[h] * -1  #flip sign to indicate we visited this anagram already, prevent duplicates in training data
+            trainingdata[instanceindex] = buildfeaturevector(word, alphabetmap, numfeatures, args)
+            instanceindex  += 1
 
     if args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", trainingdata.shape)
 
@@ -227,13 +240,12 @@ def main():
     print("Resolving anagram hashes to candidates", file=sys.stderr)
     candidates = defaultdict(list) #maps test words to  candidates (str => [str])
 
-    for pattern in patternmodel:
-        if len(pattern) == 1: #only unigrams for now
-            trainingword = pattern.tostring(classdecoder)
-            h = anahash(trainingword, alphabetmap, numfeatures)
-            if h in matchinganagramhashes:
-                for testword, vectordistance in matchinganagramhashes[h]:
-                    candidates[testword].append((trainingword,vectordistance))
+    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
+        trainingword = pattern.tostring(classdecoder)
+        h = anahash(trainingword, alphabetmap, numfeatures)
+        if h in matchinganagramhashes:
+            for testword, vectordistance in matchinganagramhashes[h]:
+                candidates[testword].append((trainingword,vectordistance))
 
     print("Ranking candidates...", file=sys.stderr)
     results = []
@@ -249,21 +261,20 @@ def main():
         candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= args.maxld and freqtuple[0] >= args.minfreq ]
         result_candidates = []
         if candidates_extended:
-            vdistancesum = sum((  distance for _, vdistance, _, _, _ in candidates_extended ))
-            ldistancesum = sum((  distance for _, _, ldistance, _, _ in candidates_extended ))
             freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
 
-            #compute a normalize compound score including all components according to their weights:
+            #compute a normalized compound score including all components according to their weights:
             candidates_scored = [ ( candidate, (
-                args.vdweight * (1.0-(vdistance/vdistancesum)) + \
-                args.ldweight * (1.0-(ldistance/ldistancesum)) + \
+                args.vdweight * (1/(vdistance+1)) + \
+                args.ldweight * (1/(ldistance+1)) + \
                 args.freqweight * (freq/freqsum) + \
                 (args.lexweight if inlexicon else 0)
-                ) / (args.vdweight + args.ldweight + args.freqweight + args.lexweight)
+                )
             ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
 
             #output candidates:
-            for candidate, score, vdistance, ldistance,freq, inlexicon in sorted(candidates_scored, key=lambda x: -1 * x[1]):
+            for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
+                if i == args.neighbours: break
                 result_candidates.append( {'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon } )
 
         result = {'text': testword, 'candidates': result_candidates}
@@ -275,10 +286,9 @@ def main():
     else:
         print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
         for result in results:
-            print(result['text'],end="")
+            print(result['text'])
             for candidate in result['candidates']:
-                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + "]",end="")
-            print()
+                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + "]")
 
 
 
