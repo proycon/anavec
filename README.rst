@@ -40,13 +40,12 @@ GNU Public License v3
 Usage
 ----------
 
-```
-usage: anavec.py [-h] -m PATTERNMODEL [-l LEXICON] -c CLASSFILE
+usage: ``anavec.py [-h] -m PATTERNMODEL [-l LEXICON] -c CLASSFILE
                  [-k NEIGHBOURS] [-n TOPN] [-D MAXLD] [-t MINFREQ]
                  [-a ALPHAFREQ] [--lexfreq LEXFREQ] [--ldweight LDWEIGHT]
                  [--vdweight VDWEIGHT] [--freqweight FREQWEIGHT]
                  [--lexweight LEXWEIGHT] [--punctweight PUNCTWEIGHT]
-                 [--unkweight UNKWEIGHT] [--json] [-d]
+                 [--unkweight UNKWEIGHT] [--json] [-d]``
 
 optional arguments:
   -h, --help            show this help message and exit
