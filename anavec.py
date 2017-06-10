@@ -14,7 +14,7 @@ UNKFEATURE = -1
 PUNCTFEATURE = -2
 
 
-def compute(trainingdata, testdata):
+def compute_vector_distances(trainingdata, testdata):
     # adapted from https://gist.github.com/danielvarga/d0eeacea92e65b19188c
     # with lamblin's workaround at https://github.com/Theano/Theano/issues/1399
 
@@ -40,11 +40,11 @@ def compute(trainingdata, testdata):
     else:
         bestIndices = T.argmin(squaredPairwiseDistances, axis=0)
 
-    #squaredpwdist_fn = theano.function([x, y], squaredPairwiseDistances, profile=False)
-    nearests_fn = theano.function([x, y], bestIndices, profile=False)
+    squaredpwdist_fn = theano.function([x, y], T.transpose(squaredPairwiseDistances), profile=False)
+    #nearests_fn = theano.function([x, y], bestIndices, profile=False)
 
-    return nearests_fn(trainingdata, testdata)
-    #return squaredpwdist_fn(trainingdata, testdata)
+    #return nearests_fn(trainingdata, testdata)
+    return squaredpwdist_fn(trainingdata, testdata)
 
 
 def buildfeaturevector(word, alphabetmap, numfeatures, args):
@@ -84,6 +84,7 @@ def main():
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',default="",required=True)
     parser.add_argument('-u','--unkweight', type=float,help="Unknown character weight", action='store',default=1,required=False)
     parser.add_argument('-p','--punctweight', type=float,help="Punctuation character weight", action='store',default=1,required=False)
+    parser.add_argument('-k','--neighbours','--neighbors', type=float,help="Maximum number of neighbours to extract", action='store',default=20,required=False)
     parser.add_argument('-d', '--debug',action='store_true')
     args = parser.parse_args()
 
@@ -148,17 +149,22 @@ def main():
 
     if args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", trainingdata.shape)
 
-    print("Computing matches...", file=sys.stderr)
-    bestindices = compute(trainingdata, testdata)
+    print("Computing vector distances between test and trainingdata...", file=sys.stderr)
+    distancematrix = compute_vector_distances(trainingdata, testdata)
 
-    print("Resolving results...", file=sys.stderr)
-
+    print("Collecting matching anagrams", file=sys.stderr)
     matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
-    for bestindex, testword in zip(bestindices, testwords):
-        h = anahash_fromvector(trainingdata[bestindex])
-        matchinganagramhashes[h].add(testword)
+    for i, (testword, distances) in enumerate(zip(testwords, distancematrix)):
+        #distances contains the distances between testword and all training instances
+        #we extract the top k:
+        for n, (distance, trainingindex) in enumerate(sorted(( (x,j) for j,x in enumerate(distances) ))): #MAYBE TODO: delegate to numpy/theano if too slow?
+            if n == args.neighbours:
+                break
+            h = anahash_fromvector(trainingdata[trainingindex])
+            matchinganagramhashes[h].add(testword)
 
-    solutions = defaultdict(list) #maps test words to solutions (the best match)
+    print("Resolving anagram hashes to candidates", file=sys.stderr)
+    solutions = defaultdict(list) #maps test words to solutions (str => [str])
 
     for pattern in patternmodel:
         if len(pattern) == 1: #only unigrams for now
