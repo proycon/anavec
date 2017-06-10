@@ -40,9 +40,11 @@ def compute(trainingdata, testdata):
     else:
         bestIndices = T.argmin(squaredPairwiseDistances, axis=0)
 
+    #squaredpwdist_fn = theano.function([x, y], squaredPairwiseDistances, profile=False)
     nearests_fn = theano.function([x, y], bestIndices, profile=False)
 
     return nearests_fn(trainingdata, testdata)
+    #return squaredpwdist_fn(trainingdata, testdata)
 
 
 def buildfeaturevector(word, alphabetmap, numfeatures, args):
