@@ -22,6 +22,12 @@ The corrections candidates are then ranked according to four components:
 These components are normalized and summed to form a score for each correction cancidate. Each of the four terms is
 parametrised by a weight, determining the share it takes in the whole score computation.
 
+This is all context insensitive, but a Language Model can be enabled for context sensitivity. The Language Model will
+score sequences of correction candidates in context. A compound score is computed for each possible sequence of
+correction candidates, taking into account both the LM score and the score from the correction model. The winning
+sequence gets selected as the Language Model-informed choice. The weight of the Language Model versus Correction Model
+in this computation is again parametrised.
+
 Dependencies
 --------------
 
@@ -31,6 +37,7 @@ This software is written in Python 3 and employs various third-party modules imp
 * `Theano <https://github.com/Theano/Theano>`_ (for multi-dimensional computation, supports GPU)
 * `Numpy <http://www.numpy.org>`_
 * `Python-Levenshtein <https://github.com/ztane/python-Levenshtein/>`_.
+* `KenLM <https://github.com/kpu/kenlm>`_ (for Language Model support)
 
 Installation
 ---------------
@@ -41,6 +48,9 @@ Stable version from the Python Package Index (**not available yet**):
 Latest version from github (https://github.com/proycon/anavec):
 * Clone this repository
 * ``python3 setup.py install``
+
+The KenLM dependency for LM support needs to be installed separately at it is not in the Python Package Index:
+* ``pip install https://github.com/kpu/kenlm/archive/master.zip``
 
 License
 ----------
@@ -60,11 +70,13 @@ optional arguments:
   -l LEXICON, --lexicon LEXICON
                         Lexicon file (training data; plain text, one word per
                         line) (default: None)
+  -L LM, --lm LM        Language model file in ARPA format (default: None)
   -c CLASSFILE, --classfile CLASSFILE
                         Class file of background corpus (default: None)
   -k NEIGHBOURS, --neighbours NEIGHBOURS, --neighbors NEIGHBOURS
-                        Maximum number of anagram neighbours to consider
-                        (default: 20)
+                        Maximum number of anagram distances to consider (the
+                        actual amount of anagrams is likely higher) (default:
+                        2)
   -n TOPN, --topn TOPN  Maximum number of candidates to return (default: 10)
   -D MAXLD, --maxld MAXLD
                         Maximum levenshtein distance (default: 5)
@@ -87,6 +99,14 @@ optional arguments:
   --lexweight LEXWEIGHT
                         Lexicon distance weight for candidating ranking
                         (default: 1)
+  --lmweight LMWEIGHT   Language Model weight for Language Model selection
+                        (together with --correctionweight) (default: 1)
+  --correctionweight CORRECTIONWEIGHT
+                        Correction Model weight for Language Model selection
+                        (together with --lmweight) (default: 1)
+  --correctscore CORRECTSCORE
+                        The score the a word must reach to be considered
+                        correct (default: 0.6)
   --punctweight PUNCTWEIGHT
                         Punctuation character weight for anagram vector
                         representation (default: 1)
@@ -94,5 +114,5 @@ optional arguments:
                         Unknown character weight for anagram vector
                         representation (default: 1)
   --json                Output JSON (default: False)
+  --noout               Do not output (default: True)
   -d, --debug
-```
