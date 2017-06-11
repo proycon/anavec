@@ -356,7 +356,7 @@ def run(*testwords, **args):
             #output candidates:
             for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
                 if i == args.topn: break
-                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= args.corrrectscore, 'lmchoice': False}) )
+                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= args.correctscore, 'lmchoice': False}) )
 
         result = AttributeDict({'text': testword, 'candidates': result_candidates})
         results.append(result)
