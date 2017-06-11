@@ -43,13 +43,16 @@ Installation
 ---------------
 
 Stable version from the Python Package Index (**not available yet**):
+
 * ``pip install anavec``
 
 Latest version from github (https://github.com/proycon/anavec):
+
 * Clone this repository
 * ``python3 setup.py install``
 
 The KenLM dependency for LM support needs to be installed separately at it is not in the Python Package Index:
+
 * ``pip install https://github.com/kpu/kenlm/archive/master.zip``
 
 License
