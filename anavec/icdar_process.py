@@ -13,7 +13,7 @@ import argparse
 import sys
 import glob
 import json
-import anavec.anavec as anavec
+from anavec.anavec import Corrector, setup_argparser
 
 def loadtext(testfile):
     """Load the text from a test file"""
@@ -31,7 +31,7 @@ def readpositiondata(positionfile):
         positiondata = json.load(f)
     return positiondata
 
-def process_task2(testfiles, positionfile, args):
+def process_task2(corrector, testfiles, positionfile, args):
     positiondata = readpositiondata(positionfile)
 
     icdar_results = {} #results as per challenge specification
@@ -64,8 +64,7 @@ def process_task2(testfiles, positionfile, args):
 
 
         print("Running anavec on test words: ", testwords, file=sys.stderr)
-        args.output=False
-        results = anavec.run(*testwords, **vars(args)) #results as presented by anavec
+        results = corrector.correct(testwords) #results as presented by anavec
 
         for result, testword, (charoffset, tokenlength) in zip(results, testwords, positions):
             assert result.text == testword
@@ -78,7 +77,7 @@ def main():
     parser = argparse.ArgumentParser(description="ICDAR 2017 Post-OCR Correction Processing Script for Task 2 with Anavec", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--input', type=str, help="Input file or directory (*.txt files)", action='store',required=True)
     parser.add_argument('--positionfile', type=str, help="Input file with position information (erroneous_tokens_pos.json)", action='store',required=True)
-    anavec.setup_argparser(parser)
+    setup_argparser(parser) #for anavec
     args = parser.parse_args()
 
     if os.path.isdir(args.input):
@@ -88,10 +87,13 @@ def main():
     else:
         testfiles = [args.input]
 
-    results = process_task2(testfiles, args.positionfile, args)
+    corrector = Corrector(**vars(args))
+    results = process_task2(corrector, testfiles, args.positionfile, args)
 
     #Output results as JSON to stdout
     print(json.dumps(results, ensure_ascii=False, indent=4))
+
+    return results
 
 if __name__ == '__main__':
     main()

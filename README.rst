@@ -18,7 +18,7 @@ The correction candidates are then ranked according to four components:
 * The squared distance between training and test anagram vector
 * The actual Levenshtein distance
 * The frequency of the candidate in the background corpus
-* The presence of the candidate in the lexicon or not
+* The presence or absence of the candidate in the lexicon
 
 These components are normalized and summed to form a score for each correction cancidate. Each of the four terms is
 parametrised by a weight, determining the share it takes in the whole score computation.
