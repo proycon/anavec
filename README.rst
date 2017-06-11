@@ -44,7 +44,7 @@ Installation
 
 Stable version from the Python Package Index (**not available yet**):
 
-* ``pip install anavec``
+* ``pip3 install anavec``
 
 Latest version from github (https://github.com/proycon/anavec):
 
@@ -53,7 +53,10 @@ Latest version from github (https://github.com/proycon/anavec):
 
 The KenLM dependency for LM support needs to be installed separately at it is not in the Python Package Index:
 
-* ``pip install https://github.com/kpu/kenlm/archive/master.zip``
+* ``pip3 install https://github.com/kpu/kenlm/archive/master.zip``
+
+Note that ``pip3`` refers to the Python 3 version of ``pip``, it may be available simply as ``pip`` on your system, especially if
+you are using a Python Virtual Environment, which we always recommended.
 
 License
 ----------
