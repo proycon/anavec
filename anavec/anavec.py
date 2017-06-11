@@ -326,7 +326,7 @@ def run(*testwords, **args):
 
     if args.json:
         print("Outputting JSON...", file=sys.stderr)
-        print(json.dumps(results))
+        print(json.dumps(results, indent=4, ensure_ascii=False))
     elif args.output:
         print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
         for result in results:
