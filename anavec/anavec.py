@@ -229,7 +229,7 @@ def run(*testwords, **args):
     alphabet = defaultdict(int)
 
     if args.lm:
-        print("Loading language model... ", numtest, file=sys.stderr)
+        print("Loading language model... ", file=sys.stderr)
         if not HASLM:
             raise Exception("KenLM is not installed! Language Model support unavailable")
         lm = kenlm.Model(args.lm)
@@ -369,8 +369,9 @@ def run(*testwords, **args):
 
         #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
         leftcontext = []
+        i = 0
         while i < len(results):
-            if results[i].correct:
+            if results[i].candidates and results[i].candidates[0].correct:
                 leftcontext.append(results[i].text)
             else:
                 #we found a correctable word
@@ -378,7 +379,7 @@ def run(*testwords, **args):
                 rightcontext = []
                 j = i+1
                 while j < len(results):
-                    if results[j].correct:
+                    if results[j].candidates and results[j].candidates[0].correct:
                         rightcontext.append(results[i].text)
                     elif rightcontext:
                         break
@@ -389,7 +390,7 @@ def run(*testwords, **args):
                 #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
                 allcandidates = [ result.candidates for result in results[i:i+span] ]
 
-                allcombinations = combinations(allcandidates)
+                allcombinations = list(combinations(allcandidates))
                 if args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + "possible combinatations for " + " ".join([ r.text for r in results[i:i+span]]),file=sys.stderr)
 
                 bestlmscore = 0
@@ -435,7 +436,8 @@ def run(*testwords, **args):
                         results.candidates = [lmchoice] + results.candidates[:lmchoice]  + results.candidates[lmchoice+1:]
 
                 leftcontext = rightcontext
-                i = i + span + len(rightcontext)
+                i = i + span + len(rightcontext) - 1
+            i += 1
 
     if args.json:
         print("Outputting JSON...", file=sys.stderr)
@@ -447,7 +449,7 @@ def run(*testwords, **args):
             for candidate in result['candidates']:
                 print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])),end="")
                 if lm:
-                    print(" lmchoice=" +str(int(results.lmchoice)), end="")
+                    print(" lmchoice=" +str(int(candidate.lmchoice)), end="")
                 print("]")
 
 
