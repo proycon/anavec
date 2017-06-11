@@ -115,7 +115,7 @@ def setup_argparser(parser):
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of a background corpus (training data; Colibri Core unindexed patternmodel)", action='store',required=True)
     parser.add_argument('-l','--lexicon', type=str,help="Lexicon file (training data; plain text, one word per line)", action='store',required=False)
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',required=True)
-    parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram neighbours to consider", action='store',default=20,required=False)
+    parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram distances to consider (the actual amount of anagrams is likely higher)", action='store',default=2, required=False)
     parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
@@ -149,8 +149,6 @@ def run(*testwords, **args):
 
     if args.lexfreq < args.minfreq:
         print("WARNING: Lexicon base frequency is smaller than minimum frequency!",file=sys.stderr)
-    if args.neighbours < args.topn:
-        print("WARNING: Neighbour threshold (-k) is lower than return candidate threshold (-n)!",file=sys.stderr)
 
 
     if not os.path.exists(args.classfile):
@@ -271,8 +269,10 @@ def run(*testwords, **args):
     for i, (testword, distances) in enumerate(zip(testwords, distancematrix)):
         #distances contains the distances between testword and all training instances
         #we extract the top k:
-        for n, (distance, trainingindex) in enumerate(sorted(( (x,j) for j,x in enumerate(distances) ))): #MAYBE TODO: delegate to numpy/theano if too slow?
-            if n == args.neighbours:
+        matchingdistances = set()
+        for distance, trainingindex in sorted(( (x,j) for j,x in enumerate(distances) )): #MAYBE TODO: delegate to numpy/theano if too slow?
+            matchingdistances.add(distance)
+            if len(matchingdistances) > args.neighbours:
                 break
             h = anahash_fromvector(trainingdata[trainingindex])
             matchinganagramhashes[h].add((testword, distance))
@@ -294,6 +294,7 @@ def run(*testwords, **args):
     results = []
     #output in same order as input
     for testword in testwords:
+        if args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
         #we have multiple candidates per testword; we are going to use four sources to rank:
         #   1) the vector distance
         #   2) the levensthein distance
@@ -302,6 +303,7 @@ def run(*testwords, **args):
         candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), getfrequencytuple(candidate, patternmodel, lexicon, classencoder, args.lexfreq)) for candidate, vdistance in candidates[testword] ]
         #prune candidates below thresholds:
         candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= args.maxld and freqtuple[0] >= args.minfreq ]
+        if args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning: " + str(len(candidates_extended)),file=sys.stderr)
         result_candidates = []
         if candidates_extended:
             freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
@@ -317,7 +319,7 @@ def run(*testwords, **args):
 
             #output candidates:
             for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
-                if i == args.neighbours: break
+                if i == args.topn: break
                 result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon }) )
 
         result = AttributeDict({'text': testword, 'candidates': result_candidates})
