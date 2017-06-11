@@ -380,7 +380,7 @@ def run(*testwords, **args):
                 j = i+1
                 while j < len(results):
                     if results[j].candidates and results[j].candidates[0].correct:
-                        rightcontext.append(results[i].text)
+                        rightcontext.append(results[j].text)
                     elif rightcontext:
                         break
                     else:
@@ -391,7 +391,7 @@ def run(*testwords, **args):
                 allcandidates = [ result.candidates for result in results[i:i+span] ]
 
                 allcombinations = list(combinations(allcandidates))
-                if args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + "possible combinatations for " + " ".join([ r.text for r in results[i:i+span]]),file=sys.stderr)
+                if args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join([ r.text for r in results[i:i+span]]) + "'",file=sys.stderr)
 
                 bestlmscore = 0
                 bestspanscore = 0 # best span score
@@ -402,9 +402,9 @@ def run(*testwords, **args):
                 for spancandidates in allcombinations:
                     text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
                     lmscore = 10 ** lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
-                    if args.debug: print("[DEBUG LM] text=" + text + " lmscore=", lmscore,file=sys.stderr)
+                    if args.debug: print("[DEBUG LM] text=" + text + " lmscore=" + str(lmscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
                     if lmscore >= bestlmscore:
-                        bestlmscore = 0
+                        bestlmscore = lmscore
                     spanscore = np.prod([candidate.score for candidate in spancandidates])
                     if spanscore > bestspanscore:
                         bestspanscore = spanscore
@@ -427,13 +427,15 @@ def run(*testwords, **args):
 
                 #reorder the candidates in the output so that the chosen candidate is always the first
                 for result in results[i:i+span]:
-                    for j, candidate in enumerate(results.candidates):
+                    lmchoice = 0
+                    for j, candidate in enumerate(result.candidates):
                         if j == 0:
                             if candidate.lmchoice:
                                 break #nothing to do
                         elif candidate.lmchoice:
                             lmchoice = j
-                        results.candidates = [lmchoice] + results.candidates[:lmchoice]  + results.candidates[lmchoice+1:]
+                    if lmchoice != 0:
+                        result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
 
                 leftcontext = rightcontext
                 i = i + span + len(rightcontext) - 1
