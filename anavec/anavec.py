@@ -370,7 +370,7 @@ def run(*testwords, **args):
         leftcontext = []
         i = 0
         while i < len(results):
-            if results[i].correct:
+            if results[i].candidates and results[i].candidates[0].correct:
                 leftcontext.append(results[i].text)
             else:
                 #we found a correctable word
@@ -378,7 +378,7 @@ def run(*testwords, **args):
                 rightcontext = []
                 j = i+1
                 while j < len(results):
-                    if results[j].correct:
+                    if results[j].candidates and results[j].candidates[0].correct:
                         rightcontext.append(results[i].text)
                     elif rightcontext:
                         break
