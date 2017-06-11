@@ -13,7 +13,7 @@ squared pairwise distances are computed between the two matrices, this acts as s
 Levenshtein/edit distance as it can be more efficiently computed. The k-nearest neighbours are retrieved for each test
 instance, these represent anagrams and are in turn resolved to all possible correction candidates.
 
-The corrections candidates are then ranked according to four components:
+The correction candidates are then ranked according to four components:
 
 * The squared distance between training and test anagram vector
 * The actual Levenshtein distance
