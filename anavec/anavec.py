@@ -69,17 +69,6 @@ def buildfeaturevector(word, alphabetmap, numfeatures, args):
     return featurevector
 
 
-def anahash(word, alphabetmap, numfeatures):
-    hashvalue = 0
-    for char in word:
-        if not char.isalnum():
-            charvalue = 100 + numfeatures + PUNCTFEATURE
-        elif char in alphabetmap:
-            charvalue = 100 + alphabetmap[char]
-        else:
-            charvalue = 100 + numfeatures + UNKFEATURE
-        hashvalue += charvalue**5
-    return hashvalue
 
 def anahash_fromvector(vector):
     hashvalue = 0
@@ -87,24 +76,6 @@ def anahash_fromvector(vector):
         hashvalue += count * ((100+i)**5)
     return hashvalue
 
-def getfrequencytuple(candidate, patternmodel, lexicon, classencoder, lexfreq):
-    """Returns a ( freq (int), inlexicon (bool) ) tuple"""
-    pattern = classencoder.buildpattern(candidate)
-    freq = patternmodel[pattern]
-    if freq > 0:
-        return freq, pattern in lexicon
-    if pattern in lexicon:
-        return lexfreq, True
-    return 0, False
-
-def trainingpatterns(patternmodel, lexicon, minfreq):
-    for pattern in patternmodel:
-        if len(pattern) == 1: #only unigrams for now
-            if patternmodel[pattern] > minfreq:
-                yield pattern
-    for pattern in lexicon:
-        if len(pattern) == 1: #only unigrams for now
-            yield pattern
 
 def timer(begintime):
     duration = time.time() - begintime
@@ -156,306 +127,353 @@ def combinations(l):
                 yield [x] + y
 
 
-def main():
-    parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    setup_argparser(parser)
-    args = parser.parse_args()
-    run(**vars(args))
 
-def run(*testwords, **args):
-    args = AttributeDict(args)
+class Corrector:
+    def __init__(self, *testwords, **args):
+        self.args = AttributeDict(args)
 
-    if not args.lexicon:
-        print("WARNING: You did not provide a lexicon! This will have a strong negative effect on the results!")
-    elif not os.path.exists(args.lexicon):
-        print("Error: Lexicon file " + args.lexicon + " does not exist",file=sys.stderr)
-        sys.exit(2)
+        if not self.args.lexicon:
+            print("WARNING: You did not provide a lexicon! This will have a strong negative effect on the results!")
+        elif not os.path.exists(self.args.lexicon):
+            print("Error: Lexicon file " + self.args.lexicon + " does not exist",file=sys.stderr)
+            sys.exit(2)
 
-    if args.lexfreq < args.minfreq:
-        print("WARNING: Lexicon base frequency is smaller than minimum frequency!",file=sys.stderr)
+        if self.args.lexfreq < self.args.minfreq:
+            print("WARNING: Lexicon base frequency is smaller than minimum frequency!",file=sys.stderr)
 
 
-    if not os.path.exists(args.classfile):
-        print("Error: Class file " + args.classfile + " does not exist",file=sys.stderr)
-        sys.exit(2)
-    if not os.path.exists(args.patternmodel):
-        print("Error: Pattern model file " + args.patternmodel + " does not exist",file=sys.stderr)
-        sys.exit(2)
+        if not os.path.exists(self.args.classfile):
+            print("Error: Class file " + self.args.classfile + " does not exist",file=sys.stderr)
+            sys.exit(2)
+        if not os.path.exists(self.args.patternmodel):
+            print("Error: Pattern model file " + self.args.patternmodel + " does not exist",file=sys.stderr)
+            sys.exit(2)
 
-    print("Normalized weights used in candidate ranking:", file=sys.stderr)
-    totalweight = args.ldweight + args.vdweight + args.freqweight + args.lexweight
-    args.vdweight = args.vdweight / totalweight
-    args.ldweight = args.ldweight / totalweight
-    args.freqweight = args.freqweight / totalweight
-    args.lexweight = args.lexweight / totalweight
-    print(" Vector distance weight: ", args.vdweight , file=sys.stderr)
-    print(" Levenshtein distance weight: ", args.ldweight, file=sys.stderr)
-    print(" Frequency weight: ", args.freqweight, file=sys.stderr)
-    print(" Lexicon weight: ", args.lexweight, file=sys.stderr)
-    print("Normalized weights used in language model ranking:", file=sys.stderr)
-    totalweight = args.lmweight + args.correctionweight
-    args.lmweight = args.lmweight / totalweight
-    args.correctionweight = args.correctionweight / totalweight
-    print(" Language model weight: ", args.lmweight , file=sys.stderr)
-    print(" Correction model weight: ", args.correctionweight, file=sys.stderr)
-
-    if not testwords:
-        print("Test input words, one per line (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
-        testwords = [ w.strip() for w in sys.stdin.readlines() ]
-
-    numtest = len(testwords)
-    print("Test set size: ", numtest, file=sys.stderr)
-
-    print("Loading background corpus from " + args.patternmodel, file=sys.stderr)
-    begintime = time.time()
-    classencoder= colibricore.ClassEncoder(args.classfile)
-    patternmodel = colibricore.UnindexedPatternModel(args.patternmodel)
-    timer(begintime)
-
-    print("Loading lexicon... ", file=sys.stderr)
-    lexicon = colibricore.UnindexedPatternModel()
-    if args.lexicon:
-        with open(args.lexicon,'r',encoding='utf-8') as f:
-            for word in f:
-                word = word.strip()
-                if word:
-                    pattern = classencoder.buildpattern(word, autoaddunknown=True) #adds lexicon words to the classencoder if they don't exist yet
-                    lexicon.add(pattern)
-
-        classencoder.save(args.classfile + '.extended')
-        classdecoder = colibricore.ClassDecoder(args.classfile + '.extended')
-    else:
-        classdecoder = colibricore.ClassDecoder(args.classfile)
-    alphabet = defaultdict(int)
-
-    if args.lm:
-        print("Loading language model... ", file=sys.stderr)
-        if not HASLM:
-            raise Exception("KenLM is not installed! Language Model support unavailable")
-        lm = kenlm.Model(args.lm)
-    else:
-        lm = None
-
-    print("Computing alphabet on training data...",file=sys.stderr)
-    begintime = time.time()
-    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
-        word = pattern.tostring(classdecoder) #string representation
-        for char in word:
-            if char.isalpha():
-                alphabet[char] += 1
-    timer(begintime)
-    if args.debug: print("[DEBUG] Alphabet count: ", alphabet)
+        print("Normalized weights used in candidate ranking:", file=sys.stderr)
+        totalweight = self.args.ldweight + self.args.vdweight + self.args.freqweight + self.args.lexweight
+        self.args.vdweight = self.args.vdweight / totalweight
+        self.args.ldweight = self.args.ldweight / totalweight
+        self.args.freqweight = self.args.freqweight / totalweight
+        self.args.lexweight = self.args.lexweight / totalweight
+        print(" Vector distance weight: ", self.args.vdweight , file=sys.stderr)
+        print(" Levenshtein distance weight: ", self.args.ldweight, file=sys.stderr)
+        print(" Frequency weight: ", self.args.freqweight, file=sys.stderr)
+        print(" Lexicon weight: ", self.args.lexweight, file=sys.stderr)
+        print("Normalized weights used in language model ranking:", file=sys.stderr)
+        totalweight = self.args.lmweight + self.args.correctionweight
+        self.args.lmweight = self.args.lmweight / totalweight
+        self.args.correctionweight = self.args.correctionweight / totalweight
+        print(" Language model weight: ", self.args.lmweight , file=sys.stderr)
+        print(" Correction model weight: ", self.args.correctionweight, file=sys.stderr)
 
 
-    #maps each character to a feature number (order number)
-    alphabetmap = {}
-    alphabetsize = 0
-    for i, (char, freq) in enumerate(sorted(alphabet.items())):
-        if freq >= args.alphafreq:
-            alphabetmap[char] = alphabetsize
-            alphabetsize += 1
+        print("Loading background corpus from " + self.args.patternmodel, file=sys.stderr)
+        begintime = time.time()
+        self.classencoder = colibricore.ClassEncoder(self.args.classfile)
+        self.patternmodel = colibricore.UnindexedPatternModel(self.args.patternmodel) #background corpus
+        timer(begintime)
 
-    print("Alphabet computed (size=" + str(alphabetsize)+"): ", list(sorted(alphabetmap.keys())), file=sys.stderr)
-    numfeatures = alphabetsize + 2 #UNK feature, PUNCT feature
-    if args.debug: print(alphabetmap)
+        print("Loading lexicon... ", file=sys.stderr)
+        self.lexicon = colibricore.UnindexedPatternModel()
+        if self.args.lexicon:
+            with open(self.args.lexicon,'r',encoding='utf-8') as f:
+                for word in f:
+                    word = word.strip()
+                    if word:
+                        pattern = self.classencoder.buildpattern(word, autoaddunknown=True) #adds lexicon words to the classencoder if they don't exist yet
+                        self.lexicon.add(pattern)
 
-    print("Building test vectors...", file=sys.stderr)
-    testdata = np.array( [ buildfeaturevector(testword, alphabetmap, numfeatures, args ) for testword in testwords] )
-    if args.debug: print("[DEBUG] TEST DATA: ", testdata)
+            self.classencoder.save(self.args.classfile + '.extended')
+            self.classdecoder = colibricore.ClassDecoder(self.args.classfile + '.extended')
+        else:
+            self.classdecoder = colibricore.ClassDecoder(self.args.classfile)
+        alphabet = defaultdict(int)
+
+        if self.args.lm:
+            print("Loading language model... ", file=sys.stderr)
+            if not HASLM:
+                raise Exception("KenLM is not installed! Language Model support unavailable")
+            self.lm = kenlm.Model(self.args.lm)
+        else:
+            self.lm = None
+
+        print("Computing alphabet on training data...",file=sys.stderr)
+        begintime = time.time()
+        for pattern in self.trainingpatterns():
+            word = pattern.tostring(self.classdecoder) #string representation
+            for char in word:
+                if char.isalpha():
+                    alphabet[char] += 1
+        timer(begintime)
+        if self.args.debug: print("[DEBUG] Alphabet count: ", alphabet)
 
 
-    numtraining = 0
-    anahashcount = defaultdict(int) #frequency count of all seen anahashes (uses to determine which are actual anagrams in the training data)
+        #maps each character to a feature number (order number)
+        self.alphabetmap = {}
+        alphabetsize = 0
+        for i, (char, freq) in enumerate(sorted(alphabet.items())):
+            if freq >= self.args.alphafreq:
+                self.alphabetmap[char] = alphabetsize
+                alphabetsize += 1
 
-    print("Counting anagrams in training data", file=sys.stderr)
-    begintime = time.time()
-    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
-        word = pattern.tostring(classdecoder)
-        h = anahash(word, alphabetmap, numfeatures)
-        anahashcount[h] += 1
-        if anahashcount[h] == 1:
-            numtraining += 1
-    timer(begintime)
+        print("Alphabet computed (size=" + str(alphabetsize)+"): ", list(sorted(self.alphabetmap.keys())), file=sys.stderr)
+        self.numfeatures = alphabetsize + 2 #UNK feature, PUNCT feature
+        if self.args.debug: print(self.alphabetmap)
 
-    print("Training set size (anagram vectors): ", numtraining, file=sys.stderr)
-    print("Background corpus size (patterns): ", len(patternmodel), file=sys.stderr)
-    print("Lexicon size (patterns): ", len(lexicon), file=sys.stderr)
 
-    print("Building training vectors and counting anagram hashes...", file=sys.stderr)
-    begintime = time.time()
-    trainingdata = np.empty((numtraining, numfeatures), dtype=np.int8)
-    instanceindex = 0
-    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
-        word = pattern.tostring(classdecoder)
-        h = anahash(word, alphabetmap, numfeatures)
-        if anahashcount[h] >= 1:
-            anahashcount[h] = anahashcount[h] * -1  #flip sign to indicate we visited this anagram already, prevent duplicates in training data
-            trainingdata[instanceindex] = buildfeaturevector(word, alphabetmap, numfeatures, args)
-            instanceindex  += 1
-    timer(begintime)
-    if args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", trainingdata.shape)
 
-    print("Computing vector distances between test and trainingdata...", file=sys.stderr)
-    begintime = time.time()
-    distancematrix = compute_vector_distances(trainingdata, testdata)
-    timer(begintime)
+        self.numtraining = 0
+        anahashcount = defaultdict(int) #frequency count of all seen anahashes (uses to determine which are actual anagrams in the training data)
 
-    print("Collecting matching anagrams", file=sys.stderr)
-    begintime = time.time()
-    matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
-    for i, (testword, distances) in enumerate(zip(testwords, distancematrix)):
-        #distances contains the distances between testword and all training instances
-        #we extract the top k:
-        matchingdistances = set()
-        for distance, trainingindex in sorted(( (x,j) for j,x in enumerate(distances) )): #MAYBE TODO: delegate to numpy/theano if too slow?
-            matchingdistances.add(distance)
-            if len(matchingdistances) > args.neighbours:
-                break
-            h = anahash_fromvector(trainingdata[trainingindex])
-            matchinganagramhashes[h].add((testword, distance))
-    timer(begintime)
+        print("Counting anagrams in training data", file=sys.stderr)
+        begintime = time.time()
+        for pattern in self.trainingpatterns():
+            word = pattern.tostring(self.classdecoder)
+            h = self.anahash(word)
+            anahashcount[h] += 1
+            if anahashcount[h] == 1:
+                self.numtraining += 1
+        timer(begintime)
 
-    print("Resolving anagram hashes to candidates", file=sys.stderr)
-    begintime = time.time()
-    candidates = defaultdict(list) #maps test words to  candidates (str => [str])
-    for pattern in trainingpatterns(lexicon, patternmodel, args.minfreq):
-        trainingword = pattern.tostring(classdecoder)
-        h = anahash(trainingword, alphabetmap, numfeatures)
-        if h in matchinganagramhashes:
-            for testword, vectordistance in matchinganagramhashes[h]:
-                candidates[testword].append((trainingword,vectordistance))
-    timer(begintime)
+        print("Training set size (anagram vectors): ", self.numtraining, file=sys.stderr)
+        print("Background corpus size (patterns): ", len(self.patternmodel), file=sys.stderr)
+        print("Lexicon size (patterns): ", len(self.lexicon), file=sys.stderr)
 
-    print("Scoring and ranking candidates...", file=sys.stderr)
-    begintime = time.time()
-    results = []
-    #output in same order as input
-    for testword in testwords:
-        if args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
-        #we have multiple candidates per testword; we are going to use four sources to rank:
-        #   1) the vector distance
-        #   2) the levensthein distance
-        #   3) the frequency in the background corpus
-        #   4) the presence in lexicon or not
-        candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), getfrequencytuple(candidate, patternmodel, lexicon, classencoder, args.lexfreq)) for candidate, vdistance in candidates[testword] ]
-        #prune candidates below thresholds:
-        candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= args.maxld and freqtuple[0] >= args.minfreq ]
-        if args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning: " + str(len(candidates_extended)),file=sys.stderr)
-        result_candidates = []
-        if candidates_extended:
-            freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
+        print("Building training vectors and counting anagram hashes...", file=sys.stderr)
+        begintime = time.time()
+        self.trainingdata = np.empty((self.numtraining, self.numfeatures), dtype=np.int8)
+        instanceindex = 0
+        for pattern in self.trainingpatterns():
+            word = pattern.tostring(self.classdecoder)
+            h = self.anahash(word)
+            if anahashcount[h] >= 1:
+                anahashcount[h] = anahashcount[h] * -1  #flip sign to indicate we visited this anagram already, prevent duplicates in training data
+                self.trainingdata[instanceindex] = buildfeaturevector(word, self.alphabetmap, self.numfeatures, self.args)
+                instanceindex  += 1
+        timer(begintime)
+        if self.args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", self.trainingdata.shape)
 
-            #compute a normalized compound score including all components according to their weights:
-            candidates_scored = [ ( candidate, (
-                args.vdweight * (1/(vdistance+1)) + \
-                args.ldweight * (1/(ldistance+1)) + \
-                args.freqweight * (freq/freqsum) + \
-                (args.lexweight if inlexicon else 0)
-                )
-            ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
+    def correct(self, testwords):
 
-            #output candidates:
-            for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
-                if i == args.topn: break
-                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= args.correctscore, 'lmchoice': False}) )
+        numtest = len(testwords)
+        print("Test set size: ", numtest, file=sys.stderr)
 
-        result = AttributeDict({'text': testword, 'candidates': result_candidates})
-        results.append(result)
-    timer(begintime)
+        print("Building test vectors...", file=sys.stderr)
+        testdata = np.array( [ buildfeaturevector(testword, self.alphabetmap, self.numfeatures, self.args ) for testword in testwords] )
+        if self.args.debug: print("[DEBUG] TEST DATA: ", testdata)
 
-    if lm:
-        print("Applying Language Model...", file=sys.stderr)
-        #ok, we're still not done yet, now we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
+        print("Computing vector distances between test and trainingdata...", file=sys.stderr)
+        begintime = time.time()
+        distancematrix = compute_vector_distances(self.trainingdata, testdata)
+        timer(begintime)
 
-        #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
-        leftcontext = []
-        i = 0
-        while i < len(results):
-            if results[i].candidates and results[i].candidates[0].correct:
-                leftcontext.append(results[i].text)
-            else:
-                #we found a correctable word
-                span = 1 #span of correctable words in tokens/words
-                rightcontext = []
-                j = i+1
-                while j < len(results):
-                    if results[j].candidates and results[j].candidates[0].correct:
-                        rightcontext.append(results[j].text)
-                    elif rightcontext:
-                        break
-                    else:
-                        span += 1
-                    j += 1
+        print("Collecting matching anagrams", file=sys.stderr)
+        begintime = time.time()
+        matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
+        for i, (testword, distances) in enumerate(zip(testwords, distancematrix)):
+            #distances contains the distances between testword and all training instances
+            #we extract the top k:
+            matchingdistances = set()
+            for distance, trainingindex in sorted(( (x,j) for j,x in enumerate(distances) )): #MAYBE TODO: delegate to numpy/theano if too slow?
+                matchingdistances.add(distance)
+                if len(matchingdistances) > self.args.neighbours:
+                    break
+                h = anahash_fromvector(self.trainingdata[trainingindex])
+                matchinganagramhashes[h].add((testword, distance))
+        timer(begintime)
 
-                #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
-                allcandidates = [ result.candidates for result in results[i:i+span] ]
+        print("Resolving anagram hashes to candidates", file=sys.stderr)
+        begintime = time.time()
+        candidates = defaultdict(list) #maps test words to  candidates (str => [str])
+        for pattern in self.trainingpatterns():
+            trainingword = pattern.tostring(self.classdecoder)
+            h = self.anahash(trainingword)
+            if h in matchinganagramhashes:
+                for testword, vectordistance in matchinganagramhashes[h]:
+                    candidates[testword].append((trainingword,vectordistance))
+        timer(begintime)
 
-                allcombinations = list(combinations(allcandidates))
-                if args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join([ r.text for r in results[i:i+span]]) + "'",file=sys.stderr)
+        print("Scoring and ranking candidates...", file=sys.stderr)
+        begintime = time.time()
+        results = []
+        #output in same order as input
+        for testword in testwords:
+            if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
+            #we have multiple candidates per testword; we are going to use four sources to rank:
+            #   1) the vector distance
+            #   2) the levensthein distance
+            #   3) the frequency in the background corpus
+            #   4) the presence in lexicon or not
+            candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), self.getfrequencytuple(candidate)) for candidate, vdistance in candidates[testword] ]
+            #prune candidates below thresholds:
+            candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= self.args.maxld and freqtuple[0] >= self.args.minfreq ]
+            if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning: " + str(len(candidates_extended)),file=sys.stderr)
+            result_candidates = []
+            if candidates_extended:
+                freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
 
-                bestlmscore = 0
-                bestspanscore = 0 # best span score
+                #compute a normalized compound score including all components according to their weights:
+                candidates_scored = [ ( candidate, (
+                    self.args.vdweight * (1/(vdistance+1)) + \
+                    self.args.ldweight * (1/(ldistance+1)) + \
+                    self.args.freqweight * (freq/freqsum) + \
+                    (self.args.lexweight if inlexicon else 0)
+                    )
+                ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
 
-                scores = []
+                #output candidates:
+                for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
+                    if i == self.args.topn: break
+                    result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False}) )
 
-                #obtain LM scores for all combinations
-                for spancandidates in allcombinations:
-                    text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
-                    lmscore = 10 ** lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
-                    if lmscore >= bestlmscore:
-                        bestlmscore = lmscore
-                    spanscore = np.prod([candidate.score for candidate in spancandidates])
-                    if spanscore > bestspanscore:
-                        bestspanscore = spanscore
-                    scores.append((lmscore, spanscore))
+            result = AttributeDict({'text': testword, 'candidates': result_candidates})
+            results.append(result)
+        timer(begintime)
 
-                #Compute a normalized span score that includes the correction scores of the individual candidates as well as the over-arching LM score
-                bestcombination = None
-                besttotalscore = 0
-                for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
-                    totalscore = args.lmweight * (lmscore/bestlmscore) + args.correctionweight * (spanscore/bestspanscore)
-                    if args.debug: print("[DEBUG LM] text=" + " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext) + " totalscore=" + str(totalscore) + " lmscore=" + str(lmscore/bestlmscore) + " spanscore=" + str(spanscore/bestspanscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
-                    if totalscore > besttotalscore:
-                        besttotalscore = totalscore
-                        bestcombination = spancandidates
+        if self.lm:
+            print("Applying Language Model...", file=sys.stderr)
+            #ok, we're still not done yet, now we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
 
-                #the best combination gets selected by the LM
-                for candidate in bestcombination:
-                    candidate.lmchoice = True
+            #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
+            leftcontext = []
+            i = 0
+            while i < len(results):
+                if results[i].candidates and results[i].candidates[0].correct:
+                    leftcontext.append(results[i].text)
+                else:
+                    #we found a correctable word
+                    span = 1 #span of correctable words in tokens/words
+                    rightcontext = []
+                    j = i+1
+                    while j < len(results):
+                        if results[j].candidates and results[j].candidates[0].correct:
+                            rightcontext.append(results[j].text)
+                        elif rightcontext:
+                            break
+                        else:
+                            span += 1
+                        j += 1
 
-                if args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
+                    #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
+                    allcandidates = [ result.candidates for result in results[i:i+span] ]
 
-                #reorder the candidates in the output so that the chosen candidate is always the first
-                for result in results[i:i+span]:
-                    lmchoice = 0
-                    for j, candidate in enumerate(result.candidates):
-                        if j == 0:
-                            if candidate.lmchoice:
-                                break #nothing to do
-                        elif candidate.lmchoice:
-                            lmchoice = j
-                    if lmchoice != 0:
-                        result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
+                    allcombinations = list(combinations(allcandidates))
+                    if self.args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join([ r.text for r in results[i:i+span]]) + "'",file=sys.stderr)
 
-                leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
-                i = i + span + len(rightcontext) - 1
-            i += 1
+                    bestlmscore = 0
+                    bestspanscore = 0 # best span score
 
-    if args.json:
+                    scores = []
+
+                    #obtain LM scores for all combinations
+                    for spancandidates in allcombinations:
+                        text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
+                        lmscore = 10 ** self.lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
+                        if lmscore >= bestlmscore:
+                            bestlmscore = lmscore
+                        spanscore = np.prod([candidate.score for candidate in spancandidates])
+                        if spanscore > bestspanscore:
+                            bestspanscore = spanscore
+                        scores.append((lmscore, spanscore))
+
+                    #Compute a normalized span score that includes the correction scores of the individual candidates as well as the over-arching LM score
+                    bestcombination = None
+                    besttotalscore = 0
+                    for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
+                        totalscore = self.args.lmweight * (lmscore/bestlmscore) + self.args.correctionweight * (spanscore/bestspanscore)
+                        if self.args.debug: print("[DEBUG LM] text=" + " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext) + " totalscore=" + str(totalscore) + " lmscore=" + str(lmscore/bestlmscore) + " spanscore=" + str(spanscore/bestspanscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
+                        if totalscore > besttotalscore:
+                            besttotalscore = totalscore
+                            bestcombination = spancandidates
+
+                    #the best combination gets selected by the LM
+                    for candidate in bestcombination:
+                        candidate.lmchoice = True
+
+                    if self.args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
+
+                    #reorder the candidates in the output so that the chosen candidate is always the first
+                    for result in results[i:i+span]:
+                        lmchoice = 0
+                        for j, candidate in enumerate(result.candidates):
+                            if j == 0:
+                                if candidate.lmchoice:
+                                    break #nothing to do
+                            elif candidate.lmchoice:
+                                lmchoice = j
+                        if lmchoice != 0:
+                            result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
+
+                    leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
+                    i = i + span + len(rightcontext) - 1
+                i += 1
+
+
+        return results
+
+    def output_json(self, results):
         print("Outputting JSON...", file=sys.stderr)
         print(json.dumps(results, indent=4, ensure_ascii=False))
-    elif args.output:
+
+    def output_report(self, results):
         print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
         for result in results:
             print(result['text'])
             for candidate in result['candidates']:
-                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])),end="")
-                if lm:
+                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])),end="")
+                if self.lm:
                     print(" lmchoice=" +str(int(candidate.lmchoice)), end="")
                 print("]")
 
+    def getfrequencytuple(self, candidate):
+        """Returns a ( freq (int), inlexicon (bool) ) tuple"""
+        pattern = self.classencoder.buildpattern(candidate)
+        try:
+            freq = self.patternmodel[pattern]
+        except KeyError:
+            freq = 0
+        if freq > 0:
+            return freq, pattern in self.lexicon
+        if pattern in self.lexicon:
+            return self.args.lexfreq, True
+        return 0, False
 
-    return results
+    def trainingpatterns(self):
+        """Iterate over all patterns in the training data (background corpus + lexicon)"""
+        for pattern in self.patternmodel:
+            if len(pattern) == 1: #only unigrams for now
+                if self.patternmodel[pattern] > self.args.minfreq:
+                    yield pattern
+        for pattern in self.lexicon:
+            if len(pattern) == 1 and pattern not in self.patternmodel: #only unigrams for now
+                yield pattern
+
+    def anahash(self, word):
+        hashvalue = 0
+        for char in word:
+            if not char.isalnum():
+                charvalue = 100 + self.numfeatures + PUNCTFEATURE
+            elif char in self.alphabetmap:
+                charvalue = 100 + self.alphabetmap[char]
+            else:
+                charvalue = 100 + self.numfeatures + UNKFEATURE
+            hashvalue += charvalue**5
+        return hashvalue
+
+def main():
+    parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    setup_argparser(parser)
+    args = parser.parse_args()
+    corrector = Corrector(**vars(args))
+
+    print("Reading test input words from standard input, expecting one word/token per line (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
+    testwords = [ w.strip() for w in sys.stdin.readlines() ]
+    results = corrector.correct(testwords)
+    if args.json:
+        corrector.output_json(results)
+    elif args.output:
+        corrector.output_report(results)
+
 
 if __name__ == '__main__':
     main()
