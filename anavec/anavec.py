@@ -389,7 +389,7 @@ def run(*testwords, **args):
                 #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
                 allcandidates = [ result.candidates for result in results[i:i+span] ]
 
-                allcombinations = combinations(allcandidates)
+                allcombinations = list(combinations(allcandidates))
                 if args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + "possible combinatations for " + " ".join([ r.text for r in results[i:i+span]]),file=sys.stderr)
 
                 bestlmscore = 0
