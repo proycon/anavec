@@ -11,7 +11,12 @@ import numpy as np
 import json
 import Levenshtein
 import colibricore
-
+try:
+    import kenlm
+    HASLM= True
+except:
+    print("WARNING: KenLM is not installed, LM support not available. See https://github.com/kpu/kenlm", file=sys.stderr)
+    HASLM = False
 
 UNKFEATURE = -1
 PUNCTFEATURE = -2
@@ -114,6 +119,7 @@ class AttributeDict(dict):
 def setup_argparser(parser):
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of a background corpus (training data; Colibri Core unindexed patternmodel)", action='store',required=True)
     parser.add_argument('-l','--lexicon', type=str,help="Lexicon file (training data; plain text, one word per line)", action='store',required=False)
+    parser.add_argument('-L','--lm', type=str,help="Language model file in ARPA format", action='store',required=False)
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',required=True)
     parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram distances to consider (the actual amount of anagrams is likely higher)", action='store',default=2, required=False)
     parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
@@ -198,6 +204,13 @@ def run(*testwords, **args):
         classdecoder = colibricore.ClassDecoder(args.classfile)
     alphabet = defaultdict(int)
 
+    if args.lm:
+        print("Loading language model... ", numtest, file=sys.stderr)
+        if not HASLM:
+            raise Exception("KenLM is not installed! Language Model support unavailable")
+        lm = kenlm.Model(args.lm)
+    else:
+        lm = None
 
     print("Computing alphabet on training data...",file=sys.stderr)
     begintime = time.time()
