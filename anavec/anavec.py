@@ -437,7 +437,7 @@ def run(*testwords, **args):
                     if lmchoice != 0:
                         result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
 
-                leftcontext = rightcontext
+                leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
                 i = i + span + len(rightcontext) - 1
             i += 1
 
