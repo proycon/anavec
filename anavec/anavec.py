@@ -402,7 +402,6 @@ def run(*testwords, **args):
                 for spancandidates in allcombinations:
                     text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
                     lmscore = 10 ** lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
-                    if args.debug: print("[DEBUG LM] text=" + text + " lmscore=" + str(lmscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
                     if lmscore >= bestlmscore:
                         bestlmscore = lmscore
                     spanscore = np.prod([candidate.score for candidate in spancandidates])
@@ -410,11 +409,12 @@ def run(*testwords, **args):
                         bestspanscore = spanscore
                     scores.append((lmscore, spanscore))
 
-                #Compute a normalized span score that includes the correction scores of the the individual candidates as well as the over-arching LM score
+                #Compute a normalized span score that includes the correction scores of the individual candidates as well as the over-arching LM score
                 bestcombination = None
                 besttotalscore = 0
                 for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
                     totalscore = args.lmweight * (lmscore/bestlmscore) + args.correctionweight * (spanscore/bestspanscore)
+                    if args.debug: print("[DEBUG LM] text=" + " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext) + " totalscore=" + str(totalscore) + " lmscore=" + str(lmscore/bestlmscore) + " spanscore=" + str(spanscore/bestspanscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
                     if totalscore > besttotalscore:
                         besttotalscore = totalscore
                         bestcombination = spancandidates
