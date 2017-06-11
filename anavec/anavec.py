@@ -446,7 +446,7 @@ def run(*testwords, **args):
             for candidate in result['candidates']:
                 print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])),end="")
                 if lm:
-                    print(" lmchoice=" +str(int(results.lmchoice)), end="")
+                    print(" lmchoice=" +str(int(candidate.lmchoice)), end="")
                 print("]")
 
 
