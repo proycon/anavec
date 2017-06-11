@@ -5,6 +5,7 @@ import argparse
 from collections import defaultdict
 import time
 import itertools
+import math
 import theano
 import theano.tensor as T
 import numpy as np
@@ -211,7 +212,7 @@ def run(*testwords, **args):
     patternmodel = colibricore.UnindexedPatternModel(args.patternmodel)
     timer(begintime)
 
-    print("Loading lexicon... ", numtest, file=sys.stderr)
+    print("Loading lexicon... ", file=sys.stderr)
     lexicon = colibricore.UnindexedPatternModel()
     if args.lexicon:
         with open(args.lexicon,'r',encoding='utf-8') as f:
@@ -356,7 +357,7 @@ def run(*testwords, **args):
             #output candidates:
             for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
                 if i == args.topn: break
-                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= args.corrrectscore, 'lmchoice': False}) )
+                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= args.correctscore, 'lmchoice': False}) )
 
         result = AttributeDict({'text': testword, 'candidates': result_candidates})
         results.append(result)
@@ -399,7 +400,7 @@ def run(*testwords, **args):
                 #obtain LM scores for all combinations
                 for spancandidates in allcombinations:
                     text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
-                    lmscore = lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))
+                    lmscore = 10 ** lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
                     if args.debug: print("[DEBUG LM] text=" + text + " lmscore=", lmscore,file=sys.stderr)
                     if lmscore >= bestlmscore:
                         bestlmscore = 0
