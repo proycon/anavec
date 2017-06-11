@@ -228,7 +228,7 @@ def run(*testwords, **args):
     alphabet = defaultdict(int)
 
     if args.lm:
-        print("Loading language model... ", numtest, file=sys.stderr)
+        print("Loading language model... ", file=sys.stderr)
         if not HASLM:
             raise Exception("KenLM is not installed! Language Model support unavailable")
         lm = kenlm.Model(args.lm)
@@ -368,6 +368,7 @@ def run(*testwords, **args):
 
         #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
         leftcontext = []
+        i = 0
         while i < len(results):
             if results[i].correct:
                 leftcontext.append(results[i].text)
@@ -434,7 +435,8 @@ def run(*testwords, **args):
                         results.candidates = [lmchoice] + results.candidates[:lmchoice]  + results.candidates[lmchoice+1:]
 
                 leftcontext = rightcontext
-                i = i + span + len(rightcontext)
+                i = i + span + len(rightcontext) - 1
+            i += 1
 
     if args.json:
         print("Outputting JSON...", file=sys.stderr)
