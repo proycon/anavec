@@ -131,11 +131,28 @@ def setup_argparser(parser):
     parser.add_argument('--vdweight', type=float,help="Vector distance weight for candidating ranking", action='store',default=1,required=False)
     parser.add_argument('--freqweight', type=float,help="Frequency weight for candidating ranking", action='store',default=1,required=False)
     parser.add_argument('--lexweight', type=float,help="Lexicon distance weight for candidating ranking", action='store',default=1,required=False)
+    parser.add_argument('--lmweight', type=float,help="Language Model weight for Language Model selection (together with --correctionweight)", action='store',default=1,required=False)
+    parser.add_argument('--correctionweight', type=float,help="Correction Model weight for Language Model selection (together with --lmweight)", action='store',default=1,required=False)
+    parser.add_argument('--correctscore', type=float,help="The score the a word must reach to be considered correct", action='store',default=0.60,required=False)
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('--noout',dest='output',action='store_false', help="Do not output")
     parser.add_argument('-d', '--debug',action='store_true')
+
+def combinations(l):
+    #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy', 'heppie')] -> [['to', 'be', 'happy'], ... ]
+    if not l:
+        yield []
+    head = l[0]
+    tail = l[1:]
+    if not tail: #stop condition
+        for x in head:
+            yield [x]
+    else: #recursion step
+        for x in head:
+            for y in combinations(tail):
+                yield [x] + y
 
 
 def main():
@@ -174,6 +191,12 @@ def run(*testwords, **args):
     print(" Levenshtein distance weight: ", args.ldweight, file=sys.stderr)
     print(" Frequency weight: ", args.freqweight, file=sys.stderr)
     print(" Lexicon weight: ", args.lexweight, file=sys.stderr)
+    print("Normalized weights used in language model ranking:", file=sys.stderr)
+    totalweight = args.lmweight + args.correctionweight
+    args.lmweight = args.lmweight / totalweight
+    args.correctionweight = args.correctionweight / totalweight
+    print(" Language model weight: ", args.lmweight , file=sys.stderr)
+    print(" Correction model weight: ", args.correctionweight, file=sys.stderr)
 
     if not testwords:
         print("Test input words, one per line (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
@@ -302,7 +325,7 @@ def run(*testwords, **args):
                 candidates[testword].append((trainingword,vectordistance))
     timer(begintime)
 
-    print("Ranking candidates...", file=sys.stderr)
+    print("Scoring and ranking candidates...", file=sys.stderr)
     begintime = time.time()
     results = []
     #output in same order as input
@@ -333,11 +356,85 @@ def run(*testwords, **args):
             #output candidates:
             for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
                 if i == args.topn: break
-                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon }) )
+                result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= args.corrrectscore, 'lmchoice': False}) )
 
         result = AttributeDict({'text': testword, 'candidates': result_candidates})
         results.append(result)
     timer(begintime)
+
+    if lm:
+        print("Applying Language Model...", file=sys.stderr)
+        #ok, we're still not done yet, now we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
+
+        #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
+        leftcontext = []
+        while i < len(results):
+            if results[i].correct:
+                leftcontext.append(results[i].text)
+            else:
+                #we found a correctable word
+                span = 1 #span of correctable words in tokens/words
+                rightcontext = []
+                j = i+1
+                while j < len(results):
+                    if results[j].correct:
+                        rightcontext.append(results[i].text)
+                    elif rightcontext:
+                        break
+                    else:
+                        span += 1
+                    j += 1
+
+                #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
+                allcandidates = [ result.candidates for result in results[i:i+span] ]
+
+                allcombinations = combinations(allcandidates)
+                if args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + "possible combinatations for " + " ".join([ r.text for r in results[i:i+span]]),file=sys.stderr)
+
+                bestlmscore = 0
+                bestspanscore = 0 # best span score
+
+                scores = []
+
+                #obtain LM scores for all combinations
+                for spancandidates in allcombinations:
+                    text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
+                    lmscore = lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))
+                    if args.debug: print("[DEBUG LM] text=" + text + " lmscore=", lmscore,file=sys.stderr)
+                    if lmscore >= bestlmscore:
+                        bestlmscore = 0
+                    spanscore = np.prod([candidate.score for candidate in spancandidates])
+                    if spanscore > bestspanscore:
+                        bestspanscore = spanscore
+                    scores.append((lmscore, spanscore))
+
+                #Compute a normalized span score that includes the correction scores of the the individual candidates as well as the over-arching LM score
+                bestcombination = None
+                besttotalscore = 0
+                for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
+                    totalscore = args.lmweight * (lmscore/bestlmscore) + args.correctionweight * (spanscore/bestspanscore)
+                    if totalscore > besttotalscore:
+                        besttotalscore = totalscore
+                        bestcombination = spancandidates
+
+                #the best combination gets selected by the LM
+                for candidate in bestcombination:
+                    candidate.lmchoice = True
+
+                if args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
+
+                #reorder the candidates in the output so that the chosen candidate is always the first
+                for result in results[i:i+span]:
+                    for j, candidate in enumerate(results.candidates):
+                        if j == 0:
+                            if candidate.lmchoice:
+                                break #nothing to do
+                        elif candidate.lmchoice:
+                            lmchoice = j
+                        results.candidates = [lmchoice] + results.candidates[:lmchoice]  + results.candidates[lmchoice+1:]
+
+                leftcontext = rightcontext
+                i = i + span + len(rightcontext)
 
     if args.json:
         print("Outputting JSON...", file=sys.stderr)
@@ -347,7 +444,10 @@ def run(*testwords, **args):
         for result in results:
             print(result['text'])
             for candidate in result['candidates']:
-                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + "]")
+                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])),end="")
+                if lm:
+                    print(" lmchoice=" +str(int(results.lmchoice)), end="")
+                print("]")
 
 
     return results
