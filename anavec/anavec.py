@@ -70,16 +70,6 @@ def compute_vector_distances(trainingdata, testdata):
     return squaredpwdist_fn(trainingdata, testdata)
 
 
-def buildfeaturevector(word, alphabetmap, numfeatures, args):
-    featurevector = np.zeros(numfeatures, dtype=np.uint8)
-    for char in word:
-        if not char.isalnum():
-            featurevector[PUNCTFEATURE] += 1 * args.punctweight
-        elif char in alphabetmap:
-            featurevector[alphabetmap[char]] += 1
-        else:
-            featurevector[UNKFEATURE] += 1 * args.unkweight
-    return featurevector
 
 
 
@@ -242,7 +232,7 @@ class Corrector:
             h = self.anahash(word)
             if anahashcount[h] >= 1:
                 anahashcount[h] = anahashcount[h] * -1  #flip sign to indicate we visited this anagram already, prevent duplicates in training data
-                self.trainingdata[instanceindex] = buildfeaturevector(word, self.alphabetmap, self.numfeatures, self.args)
+                self.trainingdata[instanceindex] = self.buildfeaturevector(word)
                 instanceindex  += 1
         timer(begintime)
         if self.args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", self.trainingdata.shape)
@@ -268,7 +258,7 @@ class Corrector:
         print("Test set size: ", numtest, file=sys.stderr)
 
         print("Building test vectors...", file=sys.stderr)
-        testdata = np.array( [ buildfeaturevector(testword, self.alphabetmap, self.numfeatures, self.args ) for testword in testwords] )
+        testdata = np.array( [ self.buildfeaturevector(testword) for testword, state in getcorrectablewords(testwords,mask)] )
         if self.args.debug: print("[DEBUG] TEST DATA: ", testdata)
 
         print("Computing vector distances between test and trainingdata...", file=sys.stderr)
@@ -312,7 +302,7 @@ class Corrector:
             if state == InputTokenState.CORRECT:
                 #Word is already correct and not to be tested, just look up some data and copy to output
                 freqtuple = self.getfrequencytuple(testword)
-                result = AttributeDict({'text': testword, 'candidates': [{'text':testword,'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmchoice':False}]})
+                result = AttributeDict({'text': testword, 'candidates': [AttributeDict({'text':testword,'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmchoice':False})]})
                 results.append(result)
             else:
                 if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
@@ -324,10 +314,10 @@ class Corrector:
                 candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), self.getfrequencytuple(candidate)) for candidate, vdistance in candidates[testword] ]
                 #prune candidates below thresholds:
                 candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= self.args.maxld and freqtuple[0] >= self.args.minfreq ]
+                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning (" + str(len(candidates_extended))+ ")", candidates_extended,file=sys.stderr)
                 if state == InputTokenState.INCORRECT:
                     #The word is explicitly marked incorrect, any correction candidate that is equal to the input word will be pruned
                     candidates_extended = [ (candidate, vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance,freq, inlexicon  in candidates_extended if candidate != testword ]
-                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning: " + str(len(candidates_extended)),file=sys.stderr)
                 result_candidates = []
                 if candidates_extended:
                     freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
@@ -350,6 +340,8 @@ class Corrector:
                 results.append(result)
         timer(begintime)
 
+        assert len(results) == len(testwords)
+
         if self.lm:
             print("Applying Language Model...", file=sys.stderr)
             #ok, we're still not done yet, now we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
@@ -358,75 +350,76 @@ class Corrector:
             leftcontext = []
             i = 0
             while i < len(results):
-                if results[i].candidates and results[i].candidates[0].correct:
-                    leftcontext.append(results[i].text)
-                else:
-                    #we found a correctable word
-                    span = 1 #span of correctable words in tokens/words
-                    rightcontext = []
-                    j = i+1
-                    while j < len(results):
-                        if results[j].candidates and results[j].candidates[0].correct:
-                            rightcontext.append(results[j].text)
-                        elif rightcontext:
-                            break
-                        else:
-                            span += 1
-                        j += 1
+                if results[i].candidates:
+                    if results[i].candidates[0].correct:
+                        leftcontext.append(results[i].text)
+                    else:
+                        #we found a correctable word
+                        span = 1 #span of correctable words in tokens/words
+                        rightcontext = []
+                        j = i+1
+                        while j < len(results):
+                            if results[j].candidates and results[j].candidates[0].correct:
+                                rightcontext.append(results[j].text)
+                            elif rightcontext:
+                                break
+                            else:
+                                span += 1
+                            j += 1
 
-                    #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
-                    allcandidates = [ result.candidates for result in results[i:i+span] ]
+                        #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
+                        allcandidates = [ result.candidates for result in results[i:i+span] ]
 
-                    allcombinations = list(combinations(allcandidates))
-                    if self.args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join([ r.text for r in results[i:i+span]]) + "'",file=sys.stderr)
+                        allcombinations = list(combinations(allcandidates))
+                        if self.args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join([ r.text for r in results[i:i+span]]) + "'",file=sys.stderr)
 
-                    bestlmscore = 0
-                    bestspanscore = 0 # best span score
+                        bestlmscore = 0
+                        bestspanscore = 0 # best span score
 
-                    scores = []
+                        scores = []
 
-                    #obtain LM scores for all combinations
-                    for spancandidates in allcombinations:
-                        text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
-                        lmscore = 10 ** self.lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
-                        if lmscore >= bestlmscore:
-                            bestlmscore = lmscore
-                        spanscore = np.prod([candidate.score for candidate in spancandidates])
-                        if spanscore > bestspanscore:
-                            bestspanscore = spanscore
-                        scores.append((lmscore, spanscore))
+                        #obtain LM scores for all combinations
+                        for spancandidates in allcombinations:
+                            text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
+                            lmscore = 10 ** self.lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
+                            if lmscore >= bestlmscore:
+                                bestlmscore = lmscore
+                            spanscore = np.prod([candidate.score for candidate in spancandidates])
+                            if spanscore > bestspanscore:
+                                bestspanscore = spanscore
+                            scores.append((lmscore, spanscore))
 
-                    #Compute a normalized span score that includes the correction scores of the individual candidates as well as the over-arching LM score
-                    bestcombination = None
-                    besttotalscore = 0
-                    for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
-                        totalscore = self.args.lmweight * (lmscore/bestlmscore) + self.args.correctionweight * (spanscore/bestspanscore)
-                        if self.args.debug: print("[DEBUG LM] text=" + " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext) + " totalscore=" + str(totalscore) + " lmscore=" + str(lmscore/bestlmscore) + " spanscore=" + str(spanscore/bestspanscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
-                        if totalscore > besttotalscore:
-                            besttotalscore = totalscore
-                            bestcombination = spancandidates
+                        #Compute a normalized span score that includes the correction scores of the individual candidates as well as the over-arching LM score
+                        bestcombination = None
+                        besttotalscore = 0
+                        for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
+                            totalscore = self.args.lmweight * (lmscore/bestlmscore) + self.args.correctionweight * (spanscore/bestspanscore)
+                            if self.args.debug: print("[DEBUG LM] text=" + " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext) + " totalscore=" + str(totalscore) + " lmscore=" + str(lmscore/bestlmscore) + " spanscore=" + str(spanscore/bestspanscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
+                            if totalscore > besttotalscore:
+                                besttotalscore = totalscore
+                                bestcombination = spancandidates
 
-                    #the best combination gets selected by the LM
-                    for candidate in bestcombination:
-                        candidate.lmchoice = True
+                        #the best combination gets selected by the LM
+                        for candidate in bestcombination:
+                            candidate.lmchoice = True
 
-                    if self.args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
+                        if self.args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
 
-                    #reorder the candidates in the output so that the chosen candidate is always the first
-                    for result in results[i:i+span]:
-                        lmchoice = 0
-                        for j, candidate in enumerate(result.candidates):
-                            if j == 0:
-                                if candidate.lmchoice:
-                                    break #nothing to do
-                            elif candidate.lmchoice:
-                                lmchoice = j
-                        if lmchoice != 0:
-                            result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
+                        #reorder the candidates in the output so that the chosen candidate is always the first
+                        for result in results[i:i+span]:
+                            lmchoice = 0
+                            for j, candidate in enumerate(result.candidates):
+                                if j == 0:
+                                    if candidate.lmchoice:
+                                        break #nothing to do
+                                elif candidate.lmchoice:
+                                    lmchoice = j
+                            if lmchoice != 0:
+                                result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
 
-                    leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
-                    if len(leftcontext) > 15: leftcontext = leftcontext[-15:]  #don't let it grow too big
-                    i = i + span + len(rightcontext) - 1
+                        leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
+                        if len(leftcontext) > 15: leftcontext = leftcontext[-15:]  #don't let it grow too big
+                        i = i + span + len(rightcontext) - 1
                 i += 1
 
 
@@ -468,6 +461,17 @@ class Corrector:
         for pattern in self.lexicon:
             if len(pattern) == 1 and pattern not in self.patternmodel: #only unigrams for now
                 yield pattern
+
+    def buildfeaturevector(self, word):
+        featurevector = np.zeros(self.numfeatures, dtype=np.uint8)
+        for char in word:
+            if not char.isalnum():
+                featurevector[PUNCTFEATURE] += 1 * self.args.punctweight
+            elif char in self.alphabetmap:
+                featurevector[self.alphabetmap[char]] += 1
+            else:
+                featurevector[UNKFEATURE] += 1 * self.args.unkweight
+        return featurevector
 
     def anahash(self, word):
         hashvalue = 0

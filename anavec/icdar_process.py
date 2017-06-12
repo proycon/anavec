@@ -13,7 +13,7 @@ import argparse
 import sys
 import glob
 import json
-from anavec.anavec import Corrector, setup_argparser
+from anavec.anavec import Corrector, setup_argparser, InputTokenState
 
 def loadtext(testfile):
     """Load the text from a test file"""
@@ -51,24 +51,40 @@ def process_task2(corrector, testfiles, positionfile, args):
         #greedy match over all 3,2,1-grams, in that order
         charoffset = 0
         testwords = []
+        mask = []
+        found = 0
+        skip = 0
+        positions_extended = []
         for i, token in enumerate(tokens):
+            if skip: #token was already processed as part of multi-token expression, skip:
+                skip -= 1
+                continue
+            state = InputTokenState.CORRECT #default state is CORRECT, only explicitly marked tokens will be correctable
+            #Do we have an explicitly marked token here?
             for position_charoffset, position_tokenlength in positions:
                 if charoffset == position_charoffset:
-                    testword = " ".join(tokens[i:i+position_tokenlength])
-                    print("[" + testfile + "@" + str(position_charoffset) + ":" + str(position_tokenlength) + "] " +  testword, file=sys.stderr)
-                    testwords.append(testword)
+                    token = " ".join(tokens[i:i+position_tokenlength])
+                    skip = position_tokenlength -1 #if the token consists of multiple tokens, signal to skip the rest
+                    print("[" + testfile + "@" + str(position_charoffset) + ":" + str(position_tokenlength) + "] " +  token, file=sys.stderr)
+                    state = InputTokenState.INCORRECT
+                    positions_extended.append((position_charoffset,position_tokenlength))
+                    found += 1
+            if state != InputTokenState.INCORRECT: positions_extended.append((0,0)) #placeholder for words that are not in the position file (already
+            mask.append(state)
+            testwords.append(token)
             charoffset += len(token) + 1
 
-        if len(testwords) != len(positions):
+        if found != len(positions):
             raise Exception("One or more positions were not found in the text!")
 
 
-        print("Running anavec on test words: ", testwords, file=sys.stderr)
-        results = corrector.correct(testwords) #results as presented by anavec
+        print("Running anavec on input: ", list(zip(testwords,mask, positions_extended)), file=sys.stderr)
+        results = corrector.correct(testwords, mask) #results as presented by anavec
 
-        for result, testword, (charoffset, tokenlength) in zip(results, testwords, positions):
+        for result, testword, (charoffset, tokenlength) in zip(results, testwords, positions_extended):
             assert result.text == testword
-            icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score for candidate in result.candidates }
+            if tokenlength > 0: #tokenlength == 0 occurs as a placeholder to signal tokens that were not in the position file
+                icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score for candidate in result.candidates }
 
     return icdar_results
 
