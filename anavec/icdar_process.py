@@ -109,7 +109,5 @@ def main():
     #Output results as JSON to stdout
     print(json.dumps(results, ensure_ascii=False, indent=4))
 
-    return results
-
 if __name__ == '__main__':
     main()
