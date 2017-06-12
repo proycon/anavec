@@ -258,9 +258,11 @@ class Corrector:
         """
 
         if not mask:
-            mask = [(InputTokenState.CORRECTABLE for word in testwords)]
+            mask = [InputTokenState.CORRECTABLE for word in testwords]
 
-        assert len(mask) == len(testwords)
+        if len(mask) != len(testwords):
+            raise Exception("Supplied mask must be as long as the testwords!")
+
 
         numtest = sum([1 for _ in getcorrectablewords(testwords, mask)])
         print("Test set size: ", numtest, file=sys.stderr)
