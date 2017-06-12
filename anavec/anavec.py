@@ -20,6 +20,7 @@ import numpy as np
 import json
 import Levenshtein
 import colibricore
+import ucto
 try:
     import kenlm
     HASLM= True
@@ -236,6 +237,46 @@ class Corrector:
                 instanceindex  += 1
         timer(begintime)
         if self.args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", self.trainingdata.shape)
+
+    def detect(self, text, language='generic',maxn=5):
+        """Given an untokenised input text, performs an error-aware tokenisation of the data into correctable tokens"""
+        tokens = []
+
+        print("Performing an initial tokenisation", file=sys.stderr)
+        tokenizer = ucto.Tokenizer('tokconfig-' + language, sentencedetection=False, paragraphdetection=False)
+        rawtokens = []
+        offset = 0
+        for token in tokenizer(text):
+            #Ensure we have the right offset in the source text, there is a bit of flexibility to accommodate for extra spacing/tabs/newlines
+            # (This algorith will fail if ucto performs any kind of ligature conversion or other kind of transformation!
+            # (TODO: should be made ligature aware to remedy)
+            deviation = 0
+            while str(token) != text[offset:len(token)]:
+                offset += 1
+                deviation += 1
+                if deviation > 25:
+                    raise Exception("Unable to align token " + str(token) + " with original text, got lost at index @" + str(offset - deviation))
+
+            trailingspace = not token.nospace()
+            if trailingspace and text[offset+len(token)] == ' ': offset += 1
+            rawtokens.append( (str(token), offset, trailingspace) )
+
+        for i, (token, offset, trailingspace) in rawtokens:
+            for n in range(maxn,0,-1):
+                ngram = rawtokens[i:i+n]
+                if len(ngram) != n: #too long?
+                    continue
+                ngram_text = "".join([t[0] for x in ngram])
+                ngram_pattern = self.classencoder.buildpattern(ngram_text, allowunknown=True)
+                if ngram_pattern.unknown():
+
+
+        print("Recombining certain tokens", file=sys.stderr)
+
+
+
+
+        return tokens, offsets
 
     def correct(self, testwords, mask=None):
         """Correct the testwords (a list of strings), an empty element or "\n" element is allowed as an explicit sentence seperator.
