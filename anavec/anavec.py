@@ -30,6 +30,11 @@ except:
 UNKFEATURE = -1
 PUNCTFEATURE = -2
 
+class InputTokenState:
+    CORRECTABLE = 0 #The input word is either correct or incorrect, it is up to the system to determine and correct it (default state)
+    CORRECT = 1 #The input word is correct, nothing is to be done for it (it is only used as context)
+    INCORRECT = 2 #The input word is explicitly incorrect, it has to be corrected
+
 
 def compute_vector_distances(trainingdata, testdata):
     # adapted from https://gist.github.com/danielvarga/d0eeacea92e65b19188c
@@ -112,6 +117,10 @@ def combinations(l):
                 yield [x] + y
 
 
+def getcorrectablewords(testwords, mask):
+    for testword, state in zip(testwords, mask):
+        if state != InputTokenState.CORRECT and testword.strip():
+            yield testword, state
 
 class Corrector:
     def __init__(self, *testwords, **args):
@@ -238,9 +247,22 @@ class Corrector:
         timer(begintime)
         if self.args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", self.trainingdata.shape)
 
-    def correct(self, testwords):
+    def correct(self, testwords, mask=None):
+        """Correct the testwords (a list of strings), an empty element or "\n" element is allowed as an explicit sentence seperator.
 
-        numtest = len(testwords)
+        The optional mask parameter is an equally-sized sequence, corresponding to the testwords, that
+        fine-tunes which words to correct, indicated by the following values:
+            0 - InputTokenState.CORRECTABLE  -- The input word is either correct or incorrect, it is up to the system to determine and correct it (default state)
+            1 - InputTokenState.CORRECT  #The input word is correct, nothing is to be done for it (it is only used as context)
+            2 - InputTokenState.INCORRECT  #The input word is explicitly incorrect, it has to be corrected
+        """
+
+        if not mask:
+            mask = [(InputTokenState.CORRECTABLE for word in testwords)]
+
+        assert len(mask) == len(testwords)
+
+        numtest = sum([1 for _ in getcorrectablewords(testwords, mask)])
         print("Test set size: ", numtest, file=sys.stderr)
 
         print("Building test vectors...", file=sys.stderr)
@@ -255,7 +277,9 @@ class Corrector:
         print("Collecting matching anagrams", file=sys.stderr)
         begintime = time.time()
         matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
-        for i, (testword, distances) in enumerate(zip(testwords, distancematrix)):
+        testinstance = 0
+        getdistancematrix = iter(distancematrix)
+        for (testword, state), distances in zip(getcorrectablewords(testwords, mask), distancematrix):
             #distances contains the distances between testword and all training instances
             #we extract the top k:
             matchingdistances = set()
@@ -282,37 +306,46 @@ class Corrector:
         begintime = time.time()
         results = []
         #output in same order as input
-        for testword in testwords:
-            if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
-            #we have multiple candidates per testword; we are going to use four sources to rank:
-            #   1) the vector distance
-            #   2) the levensthein distance
-            #   3) the frequency in the background corpus
-            #   4) the presence in lexicon or not
-            candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), self.getfrequencytuple(candidate)) for candidate, vdistance in candidates[testword] ]
-            #prune candidates below thresholds:
-            candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= self.args.maxld and freqtuple[0] >= self.args.minfreq ]
-            if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning: " + str(len(candidates_extended)),file=sys.stderr)
-            result_candidates = []
-            if candidates_extended:
-                freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
+        for testword, state in zip(testwords, mask):
+            if state == InputTokenState.CORRECT:
+                #Word is already correct and not to be tested, just look up some data and copy to output
+                freqtuple = self.getfrequencytuple(testword)
+                result = AttributeDict({'text': testword, 'candidates': [{'text':testword,'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmchoice':False}]})
+                results.append(result)
+            else:
+                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
+                #we have multiple candidates per testword; we are going to use four sources to rank:
+                #   1) the vector distance
+                #   2) the levensthein distance
+                #   3) the frequency in the background corpus
+                #   4) the presence in lexicon or not
+                candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), self.getfrequencytuple(candidate)) for candidate, vdistance in candidates[testword] ]
+                #prune candidates below thresholds:
+                candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= self.args.maxld and freqtuple[0] >= self.args.minfreq ]
+                if state == InputTokenState.INCORRECT:
+                    #The word is explicitly marked incorrect, any correction candidate that is equal to the input word will be pruned
+                    candidates_extended = [ (candidate, vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance,freq, inlexicon  in candidates_extended if candidate != testword ]
+                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning: " + str(len(candidates_extended)),file=sys.stderr)
+                result_candidates = []
+                if candidates_extended:
+                    freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
 
-                #compute a normalized compound score including all components according to their weights:
-                candidates_scored = [ ( candidate, (
-                    self.args.vdweight * (1/(vdistance+1)) + \
-                    self.args.ldweight * (1/(ldistance+1)) + \
-                    self.args.freqweight * (freq/freqsum) + \
-                    (self.args.lexweight if inlexicon else 0)
-                    )
-                ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
+                    #compute a normalized compound score including all components according to their weights:
+                    candidates_scored = [ ( candidate, (
+                        self.args.vdweight * (1/(vdistance+1)) + \
+                        self.args.ldweight * (1/(ldistance+1)) + \
+                        self.args.freqweight * (freq/freqsum) + \
+                        (self.args.lexweight if inlexicon else 0)
+                        )
+                    ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
 
-                #output candidates:
-                for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
-                    if i == self.args.topn: break
-                    result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False}) )
+                    #output candidates:
+                    for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
+                        if i == self.args.topn: break
+                        result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False}) )
 
-            result = AttributeDict({'text': testword, 'candidates': result_candidates})
-            results.append(result)
+                result = AttributeDict({'text': testword, 'candidates': result_candidates})
+                results.append(result)
         timer(begintime)
 
         if self.lm:
