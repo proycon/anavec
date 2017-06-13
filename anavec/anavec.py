@@ -20,6 +20,7 @@ import numpy as np
 import json
 import Levenshtein
 import colibricore
+from pynlpl.datatypes import PriorityQueue
 try:
     import kenlm
     HASLM= True
@@ -84,6 +85,17 @@ def timer(begintime):
     duration = time.time() - begintime
     print(" ^-- took " + str(round(duration,5)) + ' s', file=sys.stderr)
 
+def ngrams(seq, n):
+    """Yields an n-gram (tuple) at each iteration"""
+    l = len(text)
+
+    for i in range(-(n - 1),l):
+        begin = i
+        end = i + n
+        if begin >= 0 and end <= l:
+            ngram = seq[begin:end]
+            yield ngram
+
 class AttributeDict(dict):
     def __getattr__(self, attr):
         return self[attr]
@@ -107,10 +119,6 @@ def combinations(l):
                 yield [x] + y
 
 
-def getcorrectablewords(testwords, mask):
-    for testword, state in zip(testwords, mask):
-        if state != InputTokenState.CORRECT and testword.strip():
-            yield testword, state
 
 class Corrector:
     def __init__(self, *testwords, **args):
@@ -237,8 +245,8 @@ class Corrector:
         timer(begintime)
         if self.args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", self.trainingdata.shape)
 
-    def correct(self, testwords, mask=None):
-        """Correct the testwords (a list of strings), an empty element or "\n" element is allowed as an explicit sentence seperator.
+    def correct(self, testtokens, mask=None):
+        """Correct the testtokens (a list of strings in a pseudo-tokenised representation), an empty element or "\n" element is allowed as an explicit sentence seperator.
 
         The optional mask parameter is an equally-sized sequence, corresponding to the testwords, that
         fine-tunes which words to correct, indicated by the following values:
@@ -248,17 +256,18 @@ class Corrector:
         """
 
         if not mask:
-            mask = [InputTokenState.CORRECTABLE for word in testwords]
+            mask = [InputTokenState.CORRECTABLE for word in testtokens]
 
-        if len(mask) != len(testwords):
-            raise Exception("Supplied mask must be as long as the testwords!")
+        if len(mask) != len(testtokens):
+            raise Exception("Supplied mask must be as long as the testtokens!")
 
+        testpatterns = list(self.gettestpatterns(testtokens, mask))
 
-        numtest = sum([1 for _ in getcorrectablewords(testwords, mask)])
-        print("Test set size: ", numtest, file=sys.stderr)
+        numtest = len(testpatterns)
+        print("Test set model size: ", numtest, file=sys.stderr)
 
         print("Building test vectors...", file=sys.stderr)
-        testdata = np.array( [ self.buildfeaturevector(testword) for testword, state in getcorrectablewords(testwords,mask)] )
+        testdata = np.array( [ self.buildfeaturevector(testword) for testword, state in testpatterns] )
         if self.args.debug: print("[DEBUG] TEST DATA: ", testdata)
 
         print("Computing vector distances between test and trainingdata...", file=sys.stderr)
@@ -271,7 +280,11 @@ class Corrector:
         matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
         testinstance = 0
         getdistancematrix = iter(distancematrix)
-        for (testword, state), distances in zip(getcorrectablewords(testwords, mask), distancematrix):
+        for (testword, state, index, length), distances in zip(testpatterns,distancematrix):
+            #- testword is the actual text (str) of the pattern, usually a word
+            #- index is the index in the original testwords
+            #- length is the length of the pattern (in tokens)
+
             #distances contains the distances between testword and all training instances
             #we extract the top k:
             matchingdistances = set()
@@ -296,14 +309,19 @@ class Corrector:
 
         print("Scoring and ranking candidates...", file=sys.stderr)
         begintime = time.time()
-        results = []
-        #output in same order as input
-        for testword, state in zip(testwords, mask):
+
+        #We collect all candidates in a big candidate tree, where a list of candidates is stored for each test index, and each possible token length
+        candidatetree = {} #index number => length => [candidates]
+
+        for testword, state, index, length in testpatterns:
+            if not index in candidatetree: candidatetree[index] = defaultdict(list)
             if state == InputTokenState.CORRECT:
                 #Word is already correct and not to be tested, just look up some data and copy to output
                 freqtuple = self.getfrequencytuple(testword)
-                result = AttributeDict({'text': testword, 'candidates': [AttributeDict({'text':testword,'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmchoice':False})]})
-                results.append(result)
+                assert length == 1
+                candidatetree[index][length].append(
+                    AttributeDict({'text':testword,'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmchoice':False})
+                )
             else:
                 if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
                 #we have multiple candidates per testword; we are going to use four sources to rank:
@@ -322,25 +340,28 @@ class Corrector:
                 if candidates_extended:
                     freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
 
-                    #compute a normalized compound score including all components according to their weights:
-                    candidates_scored = [ ( candidate, (
-                        self.args.vdweight * (1/(vdistance+1)) + \
-                        self.args.ldweight * (1/(ldistance+1)) + \
+                    #compute a normalized confidence score including all components according to their weights:
+                    candidates_confidencescored = [ ( candidate, (
+                        self.args.vdweight * ((1/(vdistance+1)) + (length-1)) \
+                        self.args.ldweight * ((1/(ldistance+1)) + (length-1)) \
                         self.args.freqweight * (freq/freqsum) + \
                         (self.args.lexweight if inlexicon else 0)
                         )
                     ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
 
-                    #output candidates:
-                    for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_scored, key=lambda x: -1 * x[1])):
-                        if i == self.args.topn: break
-                        result_candidates.append( AttributeDict({'text': candidate,'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False}) )
-
-                result = AttributeDict({'text': testword, 'candidates': result_candidates})
-                results.append(result)
+                    #collect candidates in candidate tree
+                    #we transform the confidence score into a likelihood P(correction|original) by normalising over all candidates and taking into account their rank number
+                    candidates_confidencescores.sort(key=lambda x: -1*x[1]) #sort based on confidence score, descending
+                    candidates_confidencescored = candidates_confidencescored[:self.args.topn] #prune candidates below the cut-off threshold
+                    l = len(candidates_confidencescored))
+                    confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
+                    for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
+                        logprob = math.log10(score / confidencesum)
+                        candidatetree[index][length].append(
+                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False})
+                        )
         timer(begintime)
 
-        assert len(results) == len(testwords)
 
         if self.lm:
             print("Applying Language Model...", file=sys.stderr)
@@ -349,16 +370,18 @@ class Corrector:
             #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
             leftcontext = []
             i = 0
-            while i < len(results):
-                if results[i].candidates:
-                    if results[i].candidates[0].correct:
+            while i < len(testwords):
+                lengths = list(candidatetree[i].keys())
+
+                if candidatetree[i][1].candidates:
+                    if candidatetree[i][1].candidates[0].correct:
                         leftcontext.append(results[i].text)
                     else:
                         #we found a correctable word
                         span = 1 #span of correctable words in tokens/words
                         rightcontext = []
                         j = i+1
-                        while j < len(results):
+                        while j < len(testwords):
                             if results[j].candidates and results[j].candidates[0].correct:
                                 rightcontext.append(results[j].text)
                             elif rightcontext:
@@ -366,6 +389,8 @@ class Corrector:
                             else:
                                 span += 1
                             j += 1
+
+
 
                         #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
                         allcandidates = [ result.candidates for result in results[i:i+span] ]
@@ -462,6 +487,35 @@ class Corrector:
             if len(pattern) == 1 and pattern not in self.patternmodel: #only unigrams for now
                 yield pattern
 
+    def gettestpatterns(self, testtokens, mask):
+        testpatterns = []
+        if self.args.ngrams >= 1:
+            sequences = []
+            sequence = []
+
+        for i, (text, state) in enumerate(zip(testtokens, mask)):
+            if state != InputTokenState.CORRECT and testword.strip():
+                if self.args.ngrams >= 1: sequence.append( (text, state,i ) )
+                testpatterns.append( (text, state, i, 1) )
+            else:
+                if self.args.ngrams >= 1 and sequence:
+                    sequences.append(sequence)
+                    sequence = []
+
+        if self.args.ngrams >= 1:
+            if sequence: sequences.append(sequence) #sequences contains a sequence of consecutive correctable tokens
+            if sequences:
+                for n in range(2,self.args.ngrams+1):
+                    for sequence in sequences:
+                        for ngram in ngrams(sequence, n):
+                            text = "".join( w for w, _,_ in ngram )
+                            index = min( i for _,_,i in ngram)
+                            state = max( s for _,s,_ in ngram) #will be CORRECTABLE or INCORRECT ( CORRECT can't be part of a sequence)
+                            testpatterns.append(( text, state, index, n ))
+
+        return testpatterns
+
+
     def buildfeaturevector(self, word):
         featurevector = np.zeros(self.numfeatures, dtype=np.uint8)
         for char in word:
@@ -485,6 +539,169 @@ class Corrector:
             hashvalue += charvalue**5
         return hashvalue
 
+class StackDecoder:
+    def __init__(self, corrector, testwords, mask, candidatetree, beamsize):
+        self.corrector = corrector
+        self.testwords = testwords
+        self.mask = mask
+        self.candidatetree = candidatetree
+        self.length = len(self.testwords)
+        self.beamsize = beamsize
+        self.stacks = []
+        for i in range(0,self.length):
+            self.stacks.append(PriorityQueue([], lambda x: x.score, minimize=True, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
+
+    def decode(self):
+        for i, stack in enumerate(self):
+            while stack[i].data: #while the stack is not empty
+                hypothesis = stack[i].pop()
+                for newhypothesis in hypothesis.expand()
+                    stackindex = hypothesis.coverage()
+                    stacks[stackindex].append(newhypothesis)
+        return stack[self.length-1].pop() #return the best (=first) hypothesis in the last stack
+
+    def __iter__(self):
+        yield iter(self.stacks)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, stackindex):
+        return self.stacks[stackindex]
+
+    def append(self, stackindex, hypothesis):
+        self.stacks[stackindex].append(hypothesis)
+
+    def computeminimalcost(self):
+        """precompute and store a minimal cost for all possible contiguous sequences, this will be used in future cost estimation in the beam search"""
+
+        splits = {}
+        for n in range(2, self.length+1):
+            splits[n] = list(possiblesplits(n))
+
+        #populate the minimalcost matrix will costs directly from the candidates
+        self.minimalcost = {}
+        for index in range(0, self.length):
+            for length in range(1, self.length-index):
+                try:
+                    candidates = self.candidatetree[index][length]
+                except KeyError:
+                    candidates = None
+                cost = -9999
+                if candidates:
+                    if self.corrector.lm:
+                        cost = min( ( self.corrector.args.correctionweight * candidate.logprob + self.corrector.args.lmweight * self.corrector.lm.score(candidate.text) for candidate in candidates ) )
+                    else:
+                        cost = min( ( self.corrector.args.correctionweight * candidate.logprob for candidate in candidates ) )
+                self.minimalcost[(index, length)] = cost
+
+        #now ensure the cost of any slice is not greater than the minimal sum amongst its parts
+        for (index, length) in self.minimalcost.keys():
+            for partition in splits[length]:
+                partitionsum = 0
+                for subindex, sublength in partition:
+                    subindex = index + subindex
+                    try:
+                        partitionsum += self.minimalcost[(subindex, sublength)]
+                    except KeyError:
+                        partitionsum = None
+                        break
+                if partitionsum is not None:
+                    if partitionsum < self.minimalcost[(index, length)]:
+                        self.minimalcost[(index, length)] = partitionsum
+
+def CorrectionHypothesis:
+    def __init__(self, candidate, index, length, decoder, parent=None):
+        self.decoder = decoder #the decoder provides the necessary context, it is in turn tied to the corrector
+        self.parent = parent #links to the parent hypothesis that generated this one
+        self.cost = cost #cost so far
+        self.candidate = candidate #or None for the initial root hypothesis
+        self.index = index #the position of the last added candidate in the original testtokens sequence
+        self.length = length #the length of the last added candidate
+        if parent is None:
+            self.covered = np.zeros(len(self.decoder), dtype=np.byte)
+        else:
+            self.covered = self.parent.covert.copy()
+            self.covered[self.index:self.index+self.length+1] = 1
+        self.score = self.computescore()
+
+    def expand(self):
+        for index in range(0, self.decoder.length): # == number of target words
+            if not self.covered[index]:
+                for length, candidates in self.decoder.candidatetree[index].items():
+                    if not np.any(self.covered[index:index+length]):
+                        for candidate in candidates:
+                            yield CorrectionHypothesis(candidate, length, decoder, self)
+
+    def path(self):
+        if self.parent is None:
+            return [self]
+        else:
+            return self.parent.path() + [self]
+
+    def __str__(self):
+        return " ".join((hyp.candidate.text for hyp in self.path() ))
+
+    def computescore(self):
+        """Returns the cost thus-far and the minimum future cost of all uncovered parts, based on precomputed data and computed once"""
+
+        #correction probability of the whole chain
+        if self.parent is None
+            if self.candidate is None:
+                self.correctionprob = 0
+            else:
+                self.correctionprob = math.log10(self.candidate.score)
+        else:
+            self.correctionprob = self.parent.correctionprob + math.log10(self.candidate.score)
+
+        #cost of the hypothesis thus far
+        lmscore = self.decoder.corrector.lm.score(str(self)) #TODO
+        self.cost = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * lmscore)
+
+        self.futurecost = 0 #will be a logprob (base 10)
+        begin = None
+        length = 1
+        for i, indexcovered in enumerate(self.covered):
+            if not indexcovered:
+                #position is uncovered
+                if begin is None:
+                    begin = indexcovered
+                    length = 1
+                else:
+                    length += 1
+            else:
+                #position is covered
+                if begin is not None:
+                    #process the last uncovered sequence
+                    self.futurecost += self.decoder.minimalcost[(begin,length)]
+                    begin = None
+        if begin is not None: #do not forget to process any final uncovered sequence
+            self.futurecost += self.decoder.minimalcost[(begin,length)]
+
+
+    def complete(self):
+        return numpy.all(self.covered)
+
+
+
+
+
+class Stack:
+    def __init__(self, decoder, index, stacksize, prunethreshold):
+        self.decoder = decoder
+        self.index = index
+        self.stacksize = stacksize
+        self.prunethreshold = prunethreshold
+        self.data = []
+
+
+
+
+
+
+
+
+
 def setup_argparser(parser):
     parser.add_argument('-m','--patternmodel', type=str,help="Pattern model of a background corpus (training data; Colibri Core unindexed patternmodel)", action='store',required=True)
     parser.add_argument('-l','--lexicon', type=str,help="Lexicon file (training data; plain text, one word per line)", action='store',required=False)
@@ -492,6 +709,7 @@ def setup_argparser(parser):
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',required=True)
     parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram distances to consider (the actual amount of anagrams is likely higher)", action='store',default=2, required=False)
     parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
+    parser.add_argument('-N','--ngrams', type=int,help="N-grams to consider (max value of n)", action='store',default=3,required=False)
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
     parser.add_argument('-a','--alphafreq', type=int,help="Minimum alphabet frequency threshold (occurrence count); characters occuring less are not considered in the anagram vectors", action='store',default=10,required=False)
@@ -522,7 +740,6 @@ def main():
         corrector.output_json(results)
     elif args.output:
         corrector.output_report(results)
-
 
 if __name__ == '__main__':
     main()
