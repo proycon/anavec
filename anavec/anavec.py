@@ -21,6 +21,7 @@ import json
 import Levenshtein
 import colibricore
 from pynlpl.datatypes import PriorityQueue
+from pynlpl.algorithms import possiblesplits
 try:
     import kenlm
     HASLM= True
@@ -87,7 +88,7 @@ def timer(begintime):
 
 def ngrams(seq, n):
     """Yields an n-gram (tuple) at each iteration"""
-    l = len(text)
+    l = len(seq)
 
     for i in range(-(n - 1),l):
         begin = i
@@ -342,8 +343,8 @@ class Corrector:
 
                     #compute a normalized confidence score including all components according to their weights:
                     candidates_confidencescored = [ ( candidate, (
-                        self.args.vdweight * ((1/(vdistance+1)) + (length-1)) \
-                        self.args.ldweight * ((1/(ldistance+1)) + (length-1)) \
+                        self.args.vdweight * ((1/(vdistance+1)) + (length-1)) + \
+                        self.args.ldweight * ((1/(ldistance+1)) + (length-1)) + \
                         self.args.freqweight * (freq/freqsum) + \
                         (self.args.lexweight if inlexicon else 0)
                         )
@@ -351,104 +352,116 @@ class Corrector:
 
                     #collect candidates in candidate tree
                     #we transform the confidence score into a likelihood P(correction|original) by normalising over all candidates and taking into account their rank number
-                    candidates_confidencescores.sort(key=lambda x: -1*x[1]) #sort based on confidence score, descending
+                    candidates_confidencescored.sort(key=lambda x: -1*x[1]) #sort based on confidence score, descending
                     candidates_confidencescored = candidates_confidencescored[:self.args.topn] #prune candidates below the cut-off threshold
-                    l = len(candidates_confidencescored))
                     confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
-                        logprob = math.log10(score / confidencesum)
+                        logprob = math.log10(score / confidencesum) #normalize to get a likelihood and log to get logprob
                         candidatetree[index][length].append(
                             AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False})
                         )
         timer(begintime)
 
-
-        if self.lm:
-            print("Applying Language Model...", file=sys.stderr)
-            #ok, we're still not done yet, now we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
-
-            #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
-            leftcontext = []
-            i = 0
-            while i < len(testwords):
-                lengths = list(candidatetree[i].keys())
-
-                if candidatetree[i][1].candidates:
-                    if candidatetree[i][1].candidates[0].correct:
-                        leftcontext.append(results[i].text)
-                    else:
-                        #we found a correctable word
-                        span = 1 #span of correctable words in tokens/words
-                        rightcontext = []
-                        j = i+1
-                        while j < len(testwords):
-                            if results[j].candidates and results[j].candidates[0].correct:
-                                rightcontext.append(results[j].text)
-                            elif rightcontext:
-                                break
-                            else:
-                                span += 1
-                            j += 1
-
-
-
-                        #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
-                        allcandidates = [ result.candidates for result in results[i:i+span] ]
-
-                        allcombinations = list(combinations(allcandidates))
-                        if self.args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join([ r.text for r in results[i:i+span]]) + "'",file=sys.stderr)
-
-                        bestlmscore = 0
-                        bestspanscore = 0 # best span score
-
-                        scores = []
-
-                        #obtain LM scores for all combinations
-                        for spancandidates in allcombinations:
-                            text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
-                            lmscore = 10 ** self.lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
-                            if lmscore >= bestlmscore:
-                                bestlmscore = lmscore
-                            spanscore = np.prod([candidate.score for candidate in spancandidates])
-                            if spanscore > bestspanscore:
-                                bestspanscore = spanscore
-                            scores.append((lmscore, spanscore))
-
-                        #Compute a normalized span score that includes the correction scores of the individual candidates as well as the over-arching LM score
-                        bestcombination = None
-                        besttotalscore = 0
-                        for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
-                            totalscore = self.args.lmweight * (lmscore/bestlmscore) + self.args.correctionweight * (spanscore/bestspanscore)
-                            if self.args.debug: print("[DEBUG LM] text=" + " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext) + " totalscore=" + str(totalscore) + " lmscore=" + str(lmscore/bestlmscore) + " spanscore=" + str(spanscore/bestspanscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
-                            if totalscore > besttotalscore:
-                                besttotalscore = totalscore
-                                bestcombination = spancandidates
-
-                        #the best combination gets selected by the LM
-                        for candidate in bestcombination:
-                            candidate.lmchoice = True
-
-                        if self.args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
-
-                        #reorder the candidates in the output so that the chosen candidate is always the first
-                        for result in results[i:i+span]:
-                            lmchoice = 0
-                            for j, candidate in enumerate(result.candidates):
-                                if j == 0:
-                                    if candidate.lmchoice:
-                                        break #nothing to do
-                                elif candidate.lmchoice:
-                                    lmchoice = j
-                            if lmchoice != 0:
-                                result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
-
-                        leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
-                        if len(leftcontext) > 15: leftcontext = leftcontext[-15:]  #don't let it grow too big
-                        i = i + span + len(rightcontext) - 1
-                i += 1
-
-
+        if self.args.simple:
+            #Simple approach
+            self.applylm(candidatetree, testtokens)
+            results = [ {'text': w.text(), 'candidates': candidatetree[i][1] } for i, w in enumerate(testtokens) ]
+        else:
+            #Full context aware approach
+            print("Decoding...", file=sys.stderr)
+            decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize)
+            results = {'top':[], 'candidatetree': candidatetree, 'simple': [ {'text': w.text(), 'candidates': candidatetree[i][1] } for i, w in enumerate(testtokens) ] } #contains the top n best results
+            for i, besthypothesis in enumerate(decoder.decode(self.args.topn)):
+                result = [] #sequence of selected candidates
+                for candidate in besthypothesis.path():
+                    result.append(candidate)
+                results['top'].append(result)
         return results
+
+    def applylm(self, candidatetree, testtokens):
+        """Applies the Language Model to favour certain candidates in the simple mode (superseded by full beam decoder)"""
+        #we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
+        print("Applying Language Model...", file=sys.stderr)
+
+        #first we identify sequences of correctable words to pass to the language model along with some correct context (the first is always a correct token (or begin of sentence), and the last a correct token (or end of sentence))
+        leftcontext = []
+        i = 0
+        while i < len(testtokens):
+            if (i,1) in candidatetree:
+                if candidatetree[(i,1)][0].correct:
+                    leftcontext.append(testtokens[i])
+                else:
+                    #we found a correctable word
+                    span = 1 #span of correctable words in tokens/words
+                    rightcontext = []
+                    j = i+1
+                    while j < len(testtokens):
+                        if (j,1) in candidatetree and candidatetree[(j,1)][0].correct:
+                            rightcontext.append(testtokens[j].text)
+                        elif rightcontext:
+                            break
+                        else:
+                            span += 1
+                        j += 1
+
+                    #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
+                    allcandidates = [ candidatetree[(j,1)] for j in range(i,i+span) ]
+
+                    allcombinations = list(combinations(allcandidates))
+                    if self.args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join(testtokens[i:i+span]) + "'",file=sys.stderr)
+
+                    bestlmscore = 0
+                    bestspanscore = 0 # best span score
+
+                    scores = []
+
+                    #obtain LM scores for all combinations
+                    for spancandidates in allcombinations:
+                        text = " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext)
+                        lmscore = 10 ** self.lm.score(text, bos=(len(leftcontext)>0), eos=(len(rightcontext)>0))  #kenlm returns logprob
+                        if lmscore >= bestlmscore:
+                            bestlmscore = lmscore
+                        spanscore = np.prod([candidate.score for candidate in spancandidates])
+                        if spanscore > bestspanscore:
+                            bestspanscore = spanscore
+                        scores.append((lmscore, spanscore))
+
+                    #Compute a normalized span score that includes the correction scores of the individual candidates as well as the over-arching LM score
+                    bestcombination = None
+                    besttotalscore = 0
+                    for spancandidates, (lmscore, spanscore) in zip(allcombinations, scores):
+                        totalscore = self.args.lmweight * (lmscore/bestlmscore) + self.args.correctionweight * (spanscore/bestspanscore)
+                        if self.args.debug: print("[DEBUG LM] text=" + " ".join(leftcontext + [ candidate.text for candidate in spancandidates] + rightcontext) + " totalscore=" + str(totalscore) + " lmscore=" + str(lmscore/bestlmscore) + " spanscore=" + str(spanscore/bestspanscore) + " leftcontext=" + " ".join(leftcontext) + " rightcontext=" + " ".join(rightcontext),file=sys.stderr)
+                        if totalscore > besttotalscore:
+                            besttotalscore = totalscore
+                            bestcombination = spancandidates
+
+                    #the best combination gets selected by the LM
+                    for candidate in bestcombination:
+                        candidate.lmchoice = True
+
+                    if self.args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
+
+                    #reorder the candidates in the output so that the chosen candidate is always the first
+                    #for result in results[i:i+span]:
+                    #    lmchoice = 0
+                    #    for j, candidate in enumerate(result.candidates):
+                    #        if j == 0:
+                    #            if candidate.lmchoice:
+                    #                break #nothing to do
+                    #        elif candidate.lmchoice:
+                    #            lmchoice = j
+                    #    if lmchoice != 0:
+                    #        result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
+
+                    leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
+                    if len(leftcontext) > 15: leftcontext = leftcontext[-15:]  #don't let it grow too big
+                    i = i + span + len(rightcontext) - 1
+            i += 1
+
+
+
+
 
     def output_json(self, results):
         print("Outputting JSON...", file=sys.stderr)
@@ -456,12 +469,10 @@ class Corrector:
 
     def output_report(self, results):
         print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
-        for result in results:
+        for result in results['simple']:
             print(result['text'])
             for candidate in result['candidates']:
                 print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])),end="")
-                if self.lm:
-                    print(" lmchoice=" +str(int(candidate.lmchoice)), end="")
                 print("]")
 
     def getfrequencytuple(self, candidate):
@@ -494,7 +505,7 @@ class Corrector:
             sequence = []
 
         for i, (text, state) in enumerate(zip(testtokens, mask)):
-            if state != InputTokenState.CORRECT and testword.strip():
+            if state != InputTokenState.CORRECT and text.strip():
                 if self.args.ngrams >= 1: sequence.append( (text, state,i ) )
                 testpatterns.append( (text, state, i, 1) )
             else:
@@ -502,7 +513,7 @@ class Corrector:
                     sequences.append(sequence)
                     sequence = []
 
-        if self.args.ngrams >= 1:
+        if self.args.ngrams >= 1 and not self.args.simple:
             if sequence: sequences.append(sequence) #sequences contains a sequence of consecutive correctable tokens
             if sequences:
                 for n in range(2,self.args.ngrams+1):
@@ -551,14 +562,15 @@ class StackDecoder:
         for i in range(0,self.length):
             self.stacks.append(PriorityQueue([], lambda x: x.score, minimize=True, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
 
-    def decode(self):
+    def decode(self, topn=1):
         for i, stack in enumerate(self):
             while stack[i].data: #while the stack is not empty
                 hypothesis = stack[i].pop()
-                for newhypothesis in hypothesis.expand()
+                for newhypothesis in hypothesis.expand():
                     stackindex = hypothesis.coverage()
-                    stacks[stackindex].append(newhypothesis)
-        return stack[self.length-1].pop() #return the best (=first) hypothesis in the last stack
+                    self.stacks[stackindex].append(newhypothesis)
+        for i in range(0,topn):
+            yield self.stacks[self.length-1].pop() #return the best (=first) hypothesis in the last stack
 
     def __iter__(self):
         yield iter(self.stacks)
@@ -619,11 +631,10 @@ class StackDecoder:
             if cost is None or partitionsum < cost:
                 self.minimalcost[(index, length)] = partitionsum
 
-def CorrectionHypothesis:
+class CorrectionHypothesis:
     def __init__(self, candidate, index, length, decoder, parent=None):
         self.decoder = decoder #the decoder provides the necessary context, it is in turn tied to the corrector
         self.parent = parent #links to the parent hypothesis that generated this one
-        self.cost = cost #cost so far
         self.candidate = candidate #or None for the initial root hypothesis
         self.index = index #the position of the last added candidate in the original testtokens sequence
         self.length = length #the length of the last added candidate
@@ -640,7 +651,7 @@ def CorrectionHypothesis:
                 for length, candidates in self.decoder.candidatetree[index].items():
                     if not np.any(self.covered[index:index+length]):
                         for candidate in candidates:
-                            yield CorrectionHypothesis(candidate, length, decoder, self)
+                            yield CorrectionHypothesis(candidate, index, length, self.decoder, self)
 
     def path(self):
         if self.parent is None:
@@ -652,24 +663,25 @@ def CorrectionHypothesis:
         return " ".join((hyp.candidate.text for hyp in self.path() ))
 
     def computescore(self):
-        """Returns the cost thus-far and the minimum future cost of all uncovered parts, based on precomputed data and computed once"""
+        """Returns the cost thus-far plus the minimum future cost of all uncovered parts, based on precomputed data"""
 
         #correction probability of the whole chain
-        if self.parent is None
+        if self.parent is None:
             if self.candidate is None:
                 self.correctionprob = 0
             else:
                 self.correctionprob = math.log10(self.candidate.score)
         else:
-            self.correctionprob = self.parent.correctionprob + math.log10(self.candidate.score)
+            self.correctionprob = self.parent.correctionprob + self.candidate.logprob
 
         #cost of the hypothesis thus far
-        lmscore = self.decoder.corrector.lm.score(str(self)) #TODO
+        lmscore = self.decoder.corrector.lm.score(str(self))
         self.cost = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * lmscore)
 
         self.futurecost = 0 #will be a logprob (base 10)
         begin = None
         length = 1
+        #retrieve future cost for all consecutive uncovered parts
         for i, indexcovered in enumerate(self.covered):
             if not indexcovered:
                 #position is uncovered
@@ -687,23 +699,13 @@ def CorrectionHypothesis:
         if begin is not None: #do not forget to process any final uncovered sequence
             self.futurecost += self.decoder.minimalcost[(begin,length)]
 
+        return self.cost + self.futurecost
 
     def complete(self):
-        return numpy.all(self.covered)
+        return np.all(self.covered)
 
-
-
-
-
-class Stack:
-    def __init__(self, decoder, index, stacksize, prunethreshold):
-        self.decoder = decoder
-        self.index = index
-        self.stacksize = stacksize
-        self.prunethreshold = prunethreshold
-        self.data = []
-
-
+    def coverage(self):
+        return np.sum(self.covered)
 
 
 
@@ -722,6 +724,7 @@ def setup_argparser(parser):
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
     parser.add_argument('-a','--alphafreq', type=int,help="Minimum alphabet frequency threshold (occurrence count); characters occuring less are not considered in the anagram vectors", action='store',default=10,required=False)
+    parser.add_argument('-b','--beamsize', type=int,help="Beamsize for the decoder", action='store',default=100,required=False)
     parser.add_argument('--lexfreq', type=int,help="Artificial frequency (occurrence count) for items in the lexicon that are not in the background corpus", action='store',default=1,required=False)
     parser.add_argument('--ldweight', type=float,help="Levenshtein distance weight for candidating ranking", action='store',default=1,required=False)
     parser.add_argument('--vdweight', type=float,help="Vector distance weight for candidating ranking", action='store',default=1,required=False)
@@ -734,6 +737,7 @@ def setup_argparser(parser):
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('--noout',dest='output',action='store_false', help="Do not output")
+    parser.add_argument('--simple',action='store_true', help="Simple mode: use limited context only (if there is an LM), no n-gram support, do not employ a full beam decoder")
     parser.add_argument('-d', '--debug',action='store_true')
 
 def main():
