@@ -575,6 +575,8 @@ class StackDecoder:
     def computeminimalcost(self):
         """precompute and store a minimal cost for all possible contiguous sequences, this will be used in future cost estimation in the beam search"""
 
+        #note that in this function we minimize rather than maximize as we are useing logprobs everywhere
+
         splits = {}
         for n in range(2, self.length+1):
             splits[n] = list(possiblesplits(n))
@@ -596,7 +598,13 @@ class StackDecoder:
                 self.minimalcost[(index, length)] = cost
 
         #now ensure the cost of any slice is not greater than the minimal sum amongst its parts
-        for (index, length) in self.minimalcost.keys():
+        #also assign cost to previously uncovered slices
+        for index in range(0, self.length):
+            for length in range(1, self.length-index):
+                if (index, length) in self.minimalcost.keys():
+                    cost = self.minimalcost[(index,length)]
+                else:
+                    cost = None #we have no cost for this cell yet
             for partition in splits[length]:
                 partitionsum = 0
                 for subindex, sublength in partition:
@@ -606,9 +614,10 @@ class StackDecoder:
                     except KeyError:
                         partitionsum = None
                         break
-                if partitionsum is not None:
-                    if partitionsum < self.minimalcost[(index, length)]:
-                        self.minimalcost[(index, length)] = partitionsum
+                if partitionsum is not None and cost < partitionsum:
+                    cost = partitionsum #assigns the minimal partitionsum
+            if cost is None or partitionsum < cost:
+                self.minimalcost[(index, length)] = partitionsum
 
 def CorrectionHypothesis:
     def __init__(self, candidate, index, length, decoder, parent=None):
