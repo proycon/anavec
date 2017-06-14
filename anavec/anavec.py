@@ -561,6 +561,7 @@ class StackDecoder:
         self.candidatetree = candidatetree
         self.length = len(self.testwords)
         self.beamsize = beamsize
+        self.computeminimalcost()
         self.stacks = []
         for i in range(0,self.length):
             self.stacks.append(PriorityQueue([], lambda x: x.score, minimize=True, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
@@ -594,6 +595,8 @@ class StackDecoder:
     def computeminimalcost(self):
         """precompute and store a minimal cost for all possible contiguous sequences, this will be used in future cost estimation in the beam search"""
 
+        print("Precomputing minimal cost for decoder...",file=sys.stderr)
+
         #note that in this function we minimize rather than maximize as we are useing logprobs everywhere
 
         splits = {}
@@ -619,24 +622,30 @@ class StackDecoder:
         #now ensure the cost of any slice is not greater than the minimal sum amongst its parts
         #also assign cost to previously uncovered slices
         for index in range(0, self.length):
-            for length in range(1, self.length-index):
+            for length in range(2, self.length-index):
                 if (index, length) in self.minimalcost.keys():
                     cost = self.minimalcost[(index,length)]
                 else:
                     cost = None #we have no cost for this cell yet
-            for partition in splits[length]:
-                partitionsum = 0
-                for subindex, sublength in partition:
-                    subindex = index + subindex
-                    try:
-                        partitionsum += self.minimalcost[(subindex, sublength)]
-                    except KeyError:
-                        partitionsum = None
-                        break
-                if partitionsum is not None and cost < partitionsum:
-                    cost = partitionsum #assigns the minimal partitionsum
-            if cost is None or partitionsum < cost:
-                self.minimalcost[(index, length)] = partitionsum
+                for partition in splits[length]:
+                    partitionsum = 0
+                    for subindex, sublength in partition:
+                        subindex = index + subindex
+                        try:
+                            partitionsum += self.minimalcost[(subindex, sublength)]
+                        except KeyError:
+                            partitionsum = None
+                            break
+                    if partitionsum is not None and cost < partitionsum:
+                        cost = partitionsum #assigns the minimal partitionsum
+                if cost is None or partitionsum < cost:
+                    self.minimalcost[(index, length)] = partitionsum
+
+        print("Size of minimal cost matrix:",len(self.minimalcost), file=sys.stderr)
+        if self.corrector.args.debug:
+            print("[DEBUG] Minimal cost matrix:",self.minimalcost, file=sys.stderr)
+
+
 
 class CorrectionHypothesis:
     def __init__(self, candidate, index, length, decoder, parent=None):
