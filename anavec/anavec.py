@@ -564,6 +564,8 @@ class StackDecoder:
         self.stacks = []
         for i in range(0,self.length):
             self.stacks.append(PriorityQueue([], lambda x: x.score, minimize=True, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
+        #add initial hypothesis:
+        self.stacks[0].append(CorrectionHypothesis(None,0,0,self))
 
     def decode(self, topn=1):
         for stack in self:
@@ -659,7 +661,9 @@ class CorrectionHypothesis:
                             yield CorrectionHypothesis(candidate, index, length, self.decoder, self)
 
     def path(self):
-        if self.parent is None:
+        if self.candidate is None:
+            return []
+        elif self.parent is None:
             return [self]
         else:
             return self.parent.path() + [self]
