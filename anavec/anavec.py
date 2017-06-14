@@ -367,15 +367,16 @@ class Corrector:
             self.applylm(candidatetree, testtokens)
             results = [ {'text': w, 'candidates': candidatetree[i][1] } for i, w in enumerate(testtokens) ]
         else:
-            #Full context aware approach
+            #Full context-aware approach
             print("Decoding...", file=sys.stderr)
             decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize)
-            results = {'top':[], 'candidatetree': candidatetree, 'simple': [ {'text': w.text(), 'candidates': candidatetree[i][1] } for i, w in enumerate(testtokens) ] } #contains the top n best results
+            topresults = []
+            results = {'top':topresults, 'candidatetree': candidatetree  } #contains the top n best results
             for i, besthypothesis in enumerate(decoder.decode(self.args.topn)):
                 result = [] #sequence of selected candidates
                 for candidate in besthypothesis.path():
                     result.append(candidate)
-                results['top'].append(result)
+                topresults.append(result)
         return results
 
     def applylm(self, candidatetree, testtokens):
@@ -565,17 +566,19 @@ class StackDecoder:
             self.stacks.append(PriorityQueue([], lambda x: x.score, minimize=True, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
 
     def decode(self, topn=1):
-        for i, stack in enumerate(self):
-            while stack[i].data: #while the stack is not empty
-                hypothesis = stack[i].pop()
+        for stack in self:
+            while stack.data:
+                hypothesis = stack.pop()
                 for newhypothesis in hypothesis.expand():
                     stackindex = hypothesis.coverage()
                     self.stacks[stackindex].append(newhypothesis)
         for i in range(0,topn):
-            yield self.stacks[self.length-1].pop() #return the best (=first) hypothesis in the last stack
+            if self.stacks[self.length-1].data:
+                yield self.stacks[self.length-1].pop() #return the best (=first) hypothesis in the last stack
 
     def __iter__(self):
-        yield iter(self.stacks)
+        for stack in self.stacks:
+            yield stack
 
     def __len__(self):
         return self.length
