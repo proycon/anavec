@@ -268,7 +268,7 @@ class Corrector:
         print("Test set model size: ", numtest, file=sys.stderr)
 
         print("Building test vectors...", file=sys.stderr)
-        testdata = np.array( [ self.buildfeaturevector(testword) for testword, state in testpatterns] )
+        testdata = np.array( [ self.buildfeaturevector(testword) for testword, _,_,_ in testpatterns] )
         if self.args.debug: print("[DEBUG] TEST DATA: ", testdata)
 
         print("Computing vector distances between test and trainingdata...", file=sys.stderr)
@@ -365,7 +365,7 @@ class Corrector:
         if self.args.simple:
             #Simple approach
             self.applylm(candidatetree, testtokens)
-            results = [ {'text': w.text(), 'candidates': candidatetree[i][1] } for i, w in enumerate(testtokens) ]
+            results = [ {'text': w, 'candidates': candidatetree[i][1] } for i, w in enumerate(testtokens) ]
         else:
             #Full context aware approach
             print("Decoding...", file=sys.stderr)
@@ -387,8 +387,8 @@ class Corrector:
         leftcontext = []
         i = 0
         while i < len(testtokens):
-            if (i,1) in candidatetree:
-                if candidatetree[(i,1)][0].correct:
+            if i in candidatetree and 1 in candidatetree[i]:
+                if candidatetree[i][1][0].correct:
                     leftcontext.append(testtokens[i])
                 else:
                     #we found a correctable word
@@ -396,8 +396,8 @@ class Corrector:
                     rightcontext = []
                     j = i+1
                     while j < len(testtokens):
-                        if (j,1) in candidatetree and candidatetree[(j,1)][0].correct:
-                            rightcontext.append(testtokens[j].text)
+                        if j in candidatetree and 1 in candidatetree[j] and candidatetree[j][1][0].correct:
+                            rightcontext.append(testtokens[j])
                         elif rightcontext:
                             break
                         else:
@@ -405,7 +405,7 @@ class Corrector:
                         j += 1
 
                     #[('to', 'too'), ('be', 'bee'), ('happy', 'hapy')] (with with dicts instead of strings)
-                    allcandidates = [ candidatetree[(j,1)] for j in range(i,i+span) ]
+                    allcandidates = [ candidatetree[j][1] for j in range(i,i+span) ]
 
                     allcombinations = list(combinations(allcandidates))
                     if self.args.debug: print("[DEBUG LM] Examining " + str(len(allcombinations)) + " possible combinations for '" + " ".join(testtokens[i:i+span]) + "'",file=sys.stderr)
@@ -467,12 +467,14 @@ class Corrector:
         print("Outputting JSON...", file=sys.stderr)
         print(json.dumps(results, indent=4, ensure_ascii=False))
 
-    def output_report(self, results):
+    def output_simple(self, results):
         print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
-        for result in results['simple']:
+        for result in results:
             print(result['text'])
             for candidate in result['candidates']:
                 print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])),end="")
+                if 'lmchoice' in candidate:
+                    print(" lmchoice=" + str(int(candidate.lmchoice)), end="")
                 print("]")
 
     def getfrequencytuple(self, candidate):
@@ -752,7 +754,11 @@ def main():
     if args.json:
         corrector.output_json(results)
     elif args.output:
-        corrector.output_report(results)
+        if args.simple:
+            corrector.output_simple(results)
+        else:
+            #TODO: implement
+            raise NotImplementedError()
 
 if __name__ == '__main__':
     main()
