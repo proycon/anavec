@@ -493,11 +493,11 @@ class Corrector:
     def trainingpatterns(self):
         """Iterate over all patterns in the training data (background corpus + lexicon)"""
         for pattern in self.patternmodel:
-            if len(pattern) == 1: #only unigrams for now
+            if (self.args.simple and len(pattern) == 1)  or (not self.args.simple and len(pattern) <= self.args.ngrams):  #in simple mode only unigrams, otherwise all
                 if self.patternmodel[pattern] > self.args.minfreq:
                     yield pattern
         for pattern in self.lexicon:
-            if len(pattern) == 1 and pattern not in self.patternmodel: #only unigrams for now
+            if ((self.args.simple and len(pattern) == 1)  or (not self.args.simple and len(pattern) <= self.args.ngrams)) and pattern not in self.patternmodel: #last condition prevents yielding duplicates
                 yield pattern
 
     def gettestpatterns(self, testtokens, mask):
@@ -722,7 +722,7 @@ def setup_argparser(parser):
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',required=True)
     parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram distances to consider (the actual amount of anagrams is likely higher)", action='store',default=2, required=False)
     parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
-    parser.add_argument('-N','--ngrams', type=int,help="N-grams to consider (max value of n)", action='store',default=3,required=False)
+    parser.add_argument('-N','--ngrams', type=int,help="N-grams to consider (max value of n). Ensure that your background corpus is trained for at least the same length for this to have any effect!", action='store',default=3,required=False)
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
     parser.add_argument('-a','--alphafreq', type=int,help="Minimum alphabet frequency threshold (occurrence count); characters occuring less are not considered in the anagram vectors", action='store',default=10,required=False)
