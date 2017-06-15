@@ -347,8 +347,8 @@ class Corrector:
 
                     #compute a normalized confidence score including all components according to their weights:
                     candidates_confidencescored = [ ( candidate, (
-                        self.args.vdweight * ((1/(vdistance+1)) + (length-1)) + \
-                        self.args.ldweight * ((1/(ldistance+1)) + (length-1)) + \
+                        self.args.vdweight * (1/(vdistance+1)) + \
+                        self.args.ldweight * (1/(ldistance+1)) + \
                         self.args.freqweight * (freq/freqsum) + \
                         (self.args.lexweight if inlexicon else 0)
                         )
@@ -700,6 +700,8 @@ class CorrectionHypothesis:
             for length, candidates in self.decoder.candidatetree[nextindex].items():
                 for candidate in candidates:
                     yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
+                    if candidate.correct:
+                        break #do not consider further alternatives if candidate is resolved as correct
 
 
     def __repr__(self):
