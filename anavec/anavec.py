@@ -570,16 +570,17 @@ class StackDecoder:
 
     def decode(self, topn=1):
         for i, stack in enumerate(self):
-            print("Decoding stack " + str(i) + "...", file=sys.stderr)
-            count = 0
-            while stack.data:
-                hypothesis = stack.pop()
-                for newhypothesis in hypothesis.expand():
-                    count += 1
-                    stackindex = hypothesis.coverage()
-                    self.stacks[stackindex].append(newhypothesis)
-            print(" (" + str(count) + " hypotheses generated)", file=sys.stderr)
-            if self.corrector.args.debug: print("[DEBUG] Stack sizes: ", [ (i, len(s)) for i, s in enumerate(self.stacks) ])
+            if i < self.length - 1:
+                print("Decoding stack " + str(i) + "...", file=sys.stderr)
+                count = 0
+                while stack.data:
+                    hypothesis = stack.pop()
+                    for newhypothesis in hypothesis.expand():
+                        count += 1
+                        stackindex = hypothesis.coverage()
+                        self.stacks[stackindex].append(newhypothesis)
+                print(" (" + str(count) + " hypotheses generated)", file=sys.stderr)
+                if self.corrector.args.debug: print("[DEBUG] Stack sizes: ", [ (i, len(s)) for i, s in enumerate(self.stacks) ])
         for i in range(0,topn):
             if self.stacks[self.length].data:
                 yield self.stacks[self.length].pop() #return the best (=first) hypothesis in the last stack
@@ -659,22 +660,23 @@ class CorrectionHypothesis:
         self.candidate = candidate #or None for the initial root hypothesis
         self.index = index #the position of the last added candidate in the original testtokens sequence
         self.length = length #the length of the last added candidate
-        if parent is None:
-            self.covered = np.zeros(len(self.decoder), dtype=np.byte)
-        else:
-            self.covered = self.parent.covered.copy()
-            self.covered[self.index:self.index+self.length+1] = 1
+        #if parent is None:
+        #    self.covered = np.zeros(len(self.decoder), dtype=np.byte)
+        #else:
+        #    self.covered = self.parent.covered.copy()
+        #    self.covered[self.index:self.index+self.length+1] = 1
         self.score = self.computescore()
         if self.decoder.corrector.args.debug:
             print("[DEBUG] Generated Hypothesis " + repr(self), file=sys.stderr)
 
     def expand(self):
-        for index in range(0, self.decoder.length): # == number of target words
-            if not self.covered[index]:
-                for length, candidates in self.decoder.candidatetree[index].items():
-                    if not np.any(self.covered[index:index+length]):
-                        for candidate in candidates:
-                            yield CorrectionHypothesis(candidate, index, length, self.decoder, self)
+        #for index in range(0, self.decoder.length): # == number of target words
+        #if not self.covered[index]:
+        nextindex = self.index + self.length
+        if nextindex < self.decoder.length:
+            for length, candidates in self.decoder.candidatetree[nextindex].items():
+                for candidate in candidates:
+                    yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
 
     def path(self):
         if self.candidate is None:
@@ -682,10 +684,10 @@ class CorrectionHypothesis:
         elif self.parent is None:
             return [self]
         else:
-            return [self] + self.parent.path()
+            return self.parent.path() + [self]
 
     def __repr__(self):
-        return repr([hyp.candidate.text for hyp in self.path()]) + " [" + str(self.score) + "; " + repr(self.covered) + "]"
+        return repr([hyp.candidate.text for hyp in self.path()]) + " [" + str(self.score) + "; " + repr(self.coverage()) + "]"
 
     def __str__(self):
         return " ".join((hyp.candidate.text for hyp in self.path() ))
@@ -710,33 +712,38 @@ class CorrectionHypothesis:
         self.cost = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * lmscore)
 
         self.futurecost = 0 #will be a logprob (base 10)
-        begin = None
-        length = 1
+        #begin = None
+        #length = 1
         #retrieve future cost for all consecutive uncovered parts
-        for i, indexcovered in enumerate(self.covered):
-            if not indexcovered:
-                #position is uncovered
-                if begin is None:
-                    begin = indexcovered
-                    length = 1
-                else:
-                    length += 1
-            else:
-                #position is covered
-                if begin is not None:
-                    #process the last uncovered sequence
-                    self.futurecost += self.decoder.minimalcost[(begin,length)]
-                    begin = None
-        if begin is not None: #do not forget to process any final uncovered sequence
-            self.futurecost += self.decoder.minimalcost[(begin,length)]
+        if self.index + self.length < self.decoder.length:
+            self.futurecost += self.decoder.minimalcost[(self.index+self.length, self.decoder.length - (self.index+self.length))]
+        #for i, indexcovered in enumerate(self.covered):
+        #    if not indexcovered:
+        #        #position is uncovered
+        #        if begin is None:
+        #            begin = indexcovered
+        #            length = 1
+        #        else:
+        #            length += 1
+        #    else:
+        #        #position is covered
+        #        if begin is not None:
+        #           #process the last uncovered sequence
+        #           self.futurecost += self.decoder.minimalcost[(begin,length)]
+        #           begin = None
+
+        #if begin is not None: #do not forget to process any final uncovered sequence
+        #    self.futurecost += self.decoder.minimalcost[(begin,length)]
 
         return self.cost + self.futurecost
 
     def complete(self):
-        return np.all(self.covered)
+        return self.index + self.length == self.decoder.length
+        #return np.all(self.covered)
 
     def coverage(self):
-        return np.sum(self.covered)
+        return self.index + self.length
+        #return np.sum(self.covered)
 
 
 
