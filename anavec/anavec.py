@@ -563,21 +563,26 @@ class StackDecoder:
         self.beamsize = beamsize
         self.computeminimalcost()
         self.stacks = []
-        for i in range(0,self.length):
+        for i in range(0,self.length+1):
             self.stacks.append(PriorityQueue([], lambda x: x.score, minimize=True, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
         #add initial hypothesis:
         self.stacks[0].append(CorrectionHypothesis(None,0,0,self))
 
     def decode(self, topn=1):
-        for stack in self:
+        for i, stack in enumerate(self):
+            print("Decoding stack " + str(i) + "...", file=sys.stderr)
+            count = 0
             while stack.data:
                 hypothesis = stack.pop()
                 for newhypothesis in hypothesis.expand():
+                    count += 1
                     stackindex = hypothesis.coverage()
                     self.stacks[stackindex].append(newhypothesis)
+            print(" (" + str(count) + " hypotheses generated)", file=sys.stderr)
+            if self.corrector.args.debug: print("[DEBUG] Stack sizes: ", [ (i, len(s)) for i, s in enumerate(self.stacks) ])
         for i in range(0,topn):
-            if self.stacks[self.length-1].data:
-                yield self.stacks[self.length-1].pop() #return the best (=first) hypothesis in the last stack
+            if self.stacks[self.length].data:
+                yield self.stacks[self.length].pop() #return the best (=first) hypothesis in the last stack
 
     def __iter__(self):
         for stack in self.stacks:
@@ -606,7 +611,7 @@ class StackDecoder:
         #populate the minimalcost matrix will costs directly from the candidates
         self.minimalcost = {}
         for index in range(0, self.length):
-            for length in range(1, self.length-index):
+            for length in range(1, self.length-index+1):
                 try:
                     candidates = self.candidatetree[index][length]
                 except KeyError:
@@ -657,7 +662,7 @@ class CorrectionHypothesis:
         if parent is None:
             self.covered = np.zeros(len(self.decoder), dtype=np.byte)
         else:
-            self.covered = self.parent.covert.copy()
+            self.covered = self.parent.covered.copy()
             self.covered[self.index:self.index+self.length+1] = 1
         self.score = self.computescore()
 
@@ -679,6 +684,9 @@ class CorrectionHypothesis:
 
     def __str__(self):
         return " ".join((hyp.candidate.text for hyp in self.path() ))
+
+    def __lt__(self, other):
+        return self.score < other.score
 
     def computescore(self):
         """Returns the cost thus-far plus the minimum future cost of all uncovered parts, based on precomputed data"""
