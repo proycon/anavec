@@ -665,6 +665,8 @@ class CorrectionHypothesis:
             self.covered = self.parent.covered.copy()
             self.covered[self.index:self.index+self.length+1] = 1
         self.score = self.computescore()
+        if self.decoder.corrector.args.debug:
+            print("[DEBUG] Generated Hypothesis " + repr(self), file=sys.stderr)
 
     def expand(self):
         for index in range(0, self.decoder.length): # == number of target words
@@ -680,7 +682,10 @@ class CorrectionHypothesis:
         elif self.parent is None:
             return [self]
         else:
-            return self.parent.path() + [self]
+            return [self] + self.parent.path()
+
+    def __repr__(self):
+        return repr([hyp.candidate.text for hyp in self.path()]) + " [" + str(self.score) + "; " + repr(self.covered) + "]"
 
     def __str__(self):
         return " ".join((hyp.candidate.text for hyp in self.path() ))
