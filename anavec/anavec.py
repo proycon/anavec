@@ -372,11 +372,8 @@ class Corrector:
             decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize)
             topresults = []
             results = {'top':topresults, 'candidatetree': candidatetree, 'testtokens': testtokens, 'mask': mask  } #contains the top n best results
-            for i, besthypothesis in enumerate(decoder.decode(self.args.topn)):
-                result = [] #sequence of selected candidates
-                for candidate in besthypothesis.path():
-                    result.append(candidate)
-                topresults.append(result)
+            for i, hyp in enumerate(decoder.decode(self.args.topn)):
+                topresults.append(hyp)
         return results
 
     def applylm(self, candidatetree, testtokens):
@@ -696,19 +693,17 @@ class CorrectionHypothesis:
                 for candidate in candidates:
                     yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
 
-    def path(self):
-        if self.candidate is None:
-            return []
-        elif self.parent is None:
-            return [self]
-        else:
-            return self.parent.path() + [self]
 
     def __repr__(self):
-        return repr([hyp.candidate.text for hyp in self.path()]) + " [" + str(self.logprob) + "; " + repr(self.coverage()) + "]"
+        return "<"  + str(self) + " [" + str(self.logprob) + "; " + repr(self.coverage()) + "]>"
 
     def __str__(self):
-        return " ".join((hyp.candidate.text for hyp in self.path() ))
+        if self.candidate is None:
+            return ""
+        elif self.parent is None:
+            return self.candidate.text
+        else:
+            return (str(self.parent) + " " + self.candidate.text).strip()
 
     def __lt__(self, other):
         return self.logprob < other.logprob
