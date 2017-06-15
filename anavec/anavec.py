@@ -488,15 +488,16 @@ class Corrector:
 
     def output_report(self, results):
         print("Outputting report (use --json for full parsable output in JSON)...", file=sys.stderr)
-        for i, result in enumerate(results['top']):
-            print("RESULT #" + str(i+1) + ": " + str(result))
-            print("  Representation: " + repr(result))
         print("CANDIDATE TREE:")
         for index in results['candidatetree']:
             for length in results['candidatetree'][index]:
                 print("@" + str(index) + ":" + str(length) + " " + " ".join(results['testtokens'][index:index+length]))
                 for candidate in results['candidatetree'][index][length]:
                     print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " logprob="+str(candidate.logprob) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])) + "]")
+        print("TOP RESULTS:")
+        for i, result in enumerate(results['top']):
+            print("RESULT #" + str(i+1) + ": " + str(result))
+            print("  Representation: " + repr(result))
 
     def getfrequencytuple(self, candidate):
         """Returns a ( freq (int), inlexicon (bool) ) tuple"""
