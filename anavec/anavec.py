@@ -371,7 +371,7 @@ class Corrector:
             print("Decoding...", file=sys.stderr)
             decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize)
             topresults = []
-            results = {'top':topresults, 'candidatetree': candidatetree  } #contains the top n best results
+            results = {'top':topresults, 'candidatetree': candidatetree, 'testtokens': testtokens, 'mask': mask  } #contains the top n best results
             for i, besthypothesis in enumerate(decoder.decode(self.args.topn)):
                 result = [] #sequence of selected candidates
                 for candidate in besthypothesis.path():
@@ -478,6 +478,25 @@ class Corrector:
                     print(" lmchoice=" + str(int(candidate.lmchoice)), end="")
                 print("]")
 
+    def output(self, results):
+        print("Outputting best text (use --json for full output in JSON or --report for a report in text)...", file=sys.stderr)
+        if self.args.simple:
+            print(" ".join([w.text for w in results]))
+        else:
+            print(str(results['top'][0]))
+
+    def output_report(self, results):
+        print("Outputting report (use --json for full parsable output in JSON)...", file=sys.stderr)
+        for i, result in enumerate(results['top']):
+            print("RESULT #" + str(i+1) + ": " + str(result))
+            print("  Representation: " + repr(result))
+        print("CANDIDATE TREE:")
+        for index in results['candidatetree']:
+            for length in results['candidatetree'][index]:
+                print("@" + str(index) + ":" + str(length) + " " + " ".join(results['testtokens'][index:index+length]))
+                for candidate in results['candidatetree'][index][length]:
+                    print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " logprob="+str(candidate.logprob) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])) + "]")
+
     def getfrequencytuple(self, candidate):
         """Returns a ( freq (int), inlexicon (bool) ) tuple"""
         pattern = self.classencoder.buildpattern(candidate)
@@ -561,26 +580,25 @@ class StackDecoder:
         self.candidatetree = candidatetree
         self.length = len(self.testwords)
         self.beamsize = beamsize
-        self.computeminimalcost()
+        self.computemaxprob()
         self.stacks = []
         for i in range(0,self.length+1):
-            self.stacks.append(PriorityQueue([], lambda x: x.score, minimize=True, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
+            self.stacks.append(PriorityQueue([], lambda x: x.logprob, length=self.beamsize)) #minimize because we will be working with logprobs (base 10)
         #add initial hypothesis:
         self.stacks[0].append(CorrectionHypothesis(None,0,0,self))
 
     def decode(self, topn=1):
         for i, stack in enumerate(self):
-            if i < self.length - 1:
+            if i < self.length:
                 print("Decoding stack " + str(i) + "...", file=sys.stderr)
                 count = 0
                 while stack.data:
                     hypothesis = stack.pop()
                     for newhypothesis in hypothesis.expand():
                         count += 1
-                        stackindex = hypothesis.coverage()
-                        self.stacks[stackindex].append(newhypothesis)
-                print(" (" + str(count) + " hypotheses generated)", file=sys.stderr)
-                if self.corrector.args.debug: print("[DEBUG] Stack sizes: ", [ (i, len(s)) for i, s in enumerate(self.stacks) ])
+                        self.stacks[newhypothesis.coverage()].append(newhypothesis)
+                print(" (" + str(count) + " hypotheses generated after decoding stack " + str(i) + ")", file=sys.stderr)
+                if self.corrector.args.debug: print("[DEBUG] Stack sizes after decoding stack " + str(i)+ ": ", [ (i, len(s)) for i, s in enumerate(self.stacks) ])
         for i in range(0,topn):
             if self.stacks[self.length].data:
                 yield self.stacks[self.length].pop() #return the best (=first) hypothesis in the last stack
@@ -598,10 +616,10 @@ class StackDecoder:
     def append(self, stackindex, hypothesis):
         self.stacks[stackindex].append(hypothesis)
 
-    def computeminimalcost(self):
-        """precompute and store a minimal cost for all possible contiguous sequences, this will be used in future cost estimation in the beam search"""
+    def computemaxprob(self):
+        """precompute and store a maximal score (minimal cost) for all possible contiguous sequences, this will be used in future cost estimation in the beam search"""
 
-        print("Precomputing minimal cost for decoder...",file=sys.stderr)
+        print("Precomputing maximum probability (minimal cost) paths for decoder...",file=sys.stderr)
 
         #note that in this function we minimize rather than maximize as we are useing logprobs everywhere
 
@@ -609,47 +627,47 @@ class StackDecoder:
         for n in range(2, self.length+1):
             splits[n] = list(possiblesplits(n))
 
-        #populate the minimalcost matrix will costs directly from the candidates
-        self.minimalcost = {}
+        #populate the maxprob matrix will costs directly from the candidates
+        self.maxprob = {}
         for index in range(0, self.length):
             for length in range(1, self.length-index+1):
                 try:
                     candidates = self.candidatetree[index][length]
                 except KeyError:
                     candidates = None
-                cost = -9999
+                p = -9999
                 if candidates:
                     if self.corrector.lm:
-                        cost = min( ( self.corrector.args.correctionweight * candidate.logprob + self.corrector.args.lmweight * self.corrector.lm.score(candidate.text) for candidate in candidates ) )
+                        p = max( ( self.corrector.args.correctionweight * candidate.logprob + self.corrector.args.lmweight * self.corrector.lm.score(candidate.text) for candidate in candidates ) )
                     else:
-                        cost = min( ( self.corrector.args.correctionweight * candidate.logprob for candidate in candidates ) )
-                self.minimalcost[(index, length)] = cost
+                        p = max( ( self.corrector.args.correctionweight * candidate.logprob for candidate in candidates ) )
+                self.maxprob[(index, length)] = p
 
-        #now ensure the cost of any slice is not greater than the minimal sum amongst its parts
+        #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
         #also assign cost to previously uncovered slices
         for index in range(0, self.length):
             for length in range(2, self.length-index):
-                if (index, length) in self.minimalcost.keys():
-                    cost = self.minimalcost[(index,length)]
+                if (index, length) in self.maxprob.keys():
+                    p = self.maxprob[(index,length)]
                 else:
-                    cost = None #we have no cost for this cell yet
+                    p = None #we have no cost for this cell yet
                 for partition in splits[length]:
                     partitionsum = 0
                     for subindex, sublength in partition:
                         subindex = index + subindex
                         try:
-                            partitionsum += self.minimalcost[(subindex, sublength)]
+                            partitionsum += self.maxprob[(subindex, sublength)]
                         except KeyError:
                             partitionsum = None
                             break
-                    if partitionsum is not None and cost < partitionsum:
-                        cost = partitionsum #assigns the minimal partitionsum
-                if cost is None or partitionsum < cost:
-                    self.minimalcost[(index, length)] = partitionsum
+                    if partitionsum is not None and p < partitionsum:
+                        p = partitionsum #assigns the minimal partitionsum
+                if p is None or p < partitionsum:
+                    self.maxprob[(index, length)] = partitionsum
 
-        print("Size of minimal cost matrix:",len(self.minimalcost), file=sys.stderr)
+        print("Size of max prob matrix:",len(self.maxprob), file=sys.stderr)
         if self.corrector.args.debug:
-            print("[DEBUG] Minimal cost matrix:",self.minimalcost, file=sys.stderr)
+            print("[DEBUG] Max prob matrix:",self.maxprob, file=sys.stderr)
 
 
 
@@ -665,7 +683,7 @@ class CorrectionHypothesis:
         #else:
         #    self.covered = self.parent.covered.copy()
         #    self.covered[self.index:self.index+self.length+1] = 1
-        self.score = self.computescore()
+        self.logprob = self.computeprob()
         if self.decoder.corrector.args.debug:
             print("[DEBUG] Generated Hypothesis " + repr(self), file=sys.stderr)
 
@@ -687,15 +705,18 @@ class CorrectionHypothesis:
             return self.parent.path() + [self]
 
     def __repr__(self):
-        return repr([hyp.candidate.text for hyp in self.path()]) + " [" + str(self.score) + "; " + repr(self.coverage()) + "]"
+        return repr([hyp.candidate.text for hyp in self.path()]) + " [" + str(self.logprob) + "; " + repr(self.coverage()) + "]"
 
     def __str__(self):
         return " ".join((hyp.candidate.text for hyp in self.path() ))
 
     def __lt__(self, other):
-        return self.score < other.score
+        return self.logprob < other.logprob
 
-    def computescore(self):
+    def __gt__(self, other):
+        return self.logprob > other.logprob
+
+    def computeprob(self):
         """Returns the cost thus-far plus the minimum future cost of all uncovered parts, based on precomputed data"""
 
         #correction probability of the whole chain
@@ -703,20 +724,20 @@ class CorrectionHypothesis:
             if self.candidate is None:
                 self.correctionprob = 0
             else:
-                self.correctionprob = math.log10(self.candidate.score)
+                self.correctionprob = self.candidate.logprob
         else:
             self.correctionprob = self.parent.correctionprob + self.candidate.logprob
 
         #cost of the hypothesis thus far
-        lmscore = self.decoder.corrector.lm.score(str(self))
-        self.cost = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * lmscore)
+        lmprob = self.decoder.corrector.lm.score(str(self)) #base 10 logprob
+        self.prob = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * lmprob)
 
-        self.futurecost = 0 #will be a logprob (base 10)
+        self.futureprob = 0 #will be a logprob (base 10)
         #begin = None
         #length = 1
         #retrieve future cost for all consecutive uncovered parts
         if self.index + self.length < self.decoder.length:
-            self.futurecost += self.decoder.minimalcost[(self.index+self.length, self.decoder.length - (self.index+self.length))]
+            self.futureprob += self.decoder.maxprob[(self.index+self.length, self.decoder.length - (self.index+self.length))]
         #for i, indexcovered in enumerate(self.covered):
         #    if not indexcovered:
         #        #position is uncovered
@@ -729,13 +750,13 @@ class CorrectionHypothesis:
         #        #position is covered
         #        if begin is not None:
         #           #process the last uncovered sequence
-        #           self.futurecost += self.decoder.minimalcost[(begin,length)]
+        #           self.futurecost += self.decoder.maxprob[(begin,length)]
         #           begin = None
 
         #if begin is not None: #do not forget to process any final uncovered sequence
-        #    self.futurecost += self.decoder.minimalcost[(begin,length)]
+        #    self.futurecost += self.decoder.maxprob[(begin,length)]
 
-        return self.cost + self.futurecost
+        return self.prob + self.futureprob
 
     def complete(self):
         return self.index + self.length == self.decoder.length
@@ -773,9 +794,10 @@ def setup_argparser(parser):
     parser.add_argument('--correctscore', type=float,help="The score the a word must reach to be considered correct", action='store',default=0.60,required=False)
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
+    parser.add_argument('--simple',action='store_true', help="Simple mode: use limited context only (if there is an LM), no n-gram support, do not employ a full beam decoder")
+    parser.add_argument('--report',action='store_true', help="Output a full report")
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('--noout',dest='output',action='store_false', help="Do not output")
-    parser.add_argument('--simple',action='store_true', help="Simple mode: use limited context only (if there is an LM), no n-gram support, do not employ a full beam decoder")
     parser.add_argument('-d', '--debug',action='store_true')
 
 def main():
@@ -790,11 +812,12 @@ def main():
     if args.json:
         corrector.output_json(results)
     elif args.output:
-        if args.simple:
-            corrector.output_simple(results)
-        else:
-            #TODO: implement
-            raise NotImplementedError()
+        corrector.output(results)
+        if args.report:
+            if args.simple:
+                corrector.output_simple(results)
+            else:
+                corrector.output_report(results)
 
 if __name__ == '__main__':
     main()
