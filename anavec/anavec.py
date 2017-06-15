@@ -821,12 +821,12 @@ def main():
     if args.json:
         corrector.output_json(results)
     elif args.output:
-        corrector.output(results)
         if args.report:
             if args.simple:
                 corrector.output_simple(results)
             else:
                 corrector.output_report(results)
+        corrector.output(results)
 
 if __name__ == '__main__':
     main()
