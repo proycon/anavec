@@ -353,7 +353,7 @@ class Corrector:
                     #collect candidates in candidate tree
                     #we transform the confidence score into a likelihood P(correction|original) by normalising over all candidates and taking into account their rank number
                     candidates_confidencescored.sort(key=lambda x: -1*x[1]) #sort based on confidence score, descending
-                    candidates_confidencescored = candidates_confidencescored[:self.args.topn] #prune candidates below the cut-off threshold
+                    candidates_confidencescored = candidates_confidencescored[:self.args.candidates] #prune candidates below the cut-off threshold
                     confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
                         logprob = math.log10(score / confidencesum) #normalize to get a likelihood and log to get logprob
@@ -777,7 +777,8 @@ def setup_argparser(parser):
     parser.add_argument('-l','--lexicon', type=str,help="Lexicon file (training data; plain text, one word per line)", action='store',required=False)
     parser.add_argument('-L','--lm', type=str,help="Language model file in ARPA format", action='store',required=False)
     parser.add_argument('-c','--classfile', type=str,help="Class file of background corpus", action='store',required=True)
-    parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram distances to consider (the actual amount of anagrams is likely higher)", action='store',default=2, required=False)
+    parser.add_argument('-k','--neighbours','--neighbors', type=int,help="Maximum number of anagram distances to consider (the actual amount of anagrams is likely higher)", action='store',default=3, required=False)
+    parser.add_argument('-K','--candidates', type=int,help="Maximum number of candidates  to consider per input token/pattern", action='store',default=100, required=False)
     parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
     parser.add_argument('-N','--ngrams', type=int,help="N-grams to consider (max value of n). Ensure that your background corpus is trained for at least the same length for this to have any effect!", action='store',default=3,required=False)
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
