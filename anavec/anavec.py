@@ -345,11 +345,11 @@ class Corrector:
                 if candidates_extended:
                     freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
 
-                    #compute a confidence score including all components according to their weights:
+                    #compute a normalized confidence score including all components according to their weights:
                     candidates_confidencescored = [ ( candidate, (
                         self.args.vdweight * (1/(vdistance+1)) + \
                         self.args.ldweight * (1/(ldistance+1)) + \
-                        self.args.freqweight * (freq/self.patternmodel.tokens()) + \
+                        self.args.freqweight * (freq/freqsum) + \
                         (self.args.lexweight if inlexicon else 0)
                         )
                     ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
@@ -360,7 +360,7 @@ class Corrector:
                     candidates_confidencescored = candidates_confidencescored[:self.args.candidates] #prune candidates below the cut-off threshold
                     confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
-                        logprob = math.log10(score)
+                        logprob = math.log10(score / confidencesum) #normalize to get a likelihood and log to get logprob
                         candidatetree[index][length].append(
                             AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False})
                         )
@@ -694,6 +694,8 @@ class CorrectionHypothesis:
             print("[DEBUG] Generated Hypothesis " + repr(self), file=sys.stderr)
 
     def expand(self):
+        #for index in range(0, self.decoder.length): # == number of target words
+        #if not self.covered[index]:
         nextindex = self.index + self.length
         if nextindex < self.decoder.length:
             for length, candidates in self.decoder.candidatetree[nextindex].items():
