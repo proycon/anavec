@@ -695,7 +695,7 @@ class CorrectionHypothesis:
 
 
     def __repr__(self):
-        return "<"  + str(self) + " [" + str(self.logprob) + "; " + repr(self.coverage()) + "]>"
+        return "<"  + str(self) + " [logprob=" + str(self.logprob) + "; coverage=" + repr(self.coverage()) + "; correctionprob=" + str(self.correctionprob) + "; lmprob=" + str(self.lmprob) + "]>"
 
     def __str__(self):
         if self.candidate is None:
@@ -724,8 +724,13 @@ class CorrectionHypothesis:
             self.correctionprob = self.parent.correctionprob + self.candidate.logprob
 
         #cost of the hypothesis thus far
-        lmprob = self.decoder.corrector.lm.score(str(self)) #base 10 logprob
-        self.prob = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * lmprob)
+        if self.decoder.corrector.lm:
+            self.lmprob = self.decoder.corrector.lm.score(str(self)) #base 10 logprob
+            self.prob = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * self.lmprob)
+        else:
+            self.lmprob = 0
+            self.prob = self.correctionprob
+
 
         self.futureprob = 0 #will be a logprob (base 10)
         #begin = None
