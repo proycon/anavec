@@ -203,7 +203,11 @@ class Corrector:
 
         #maps each character to a feature number (order number)
         self.alphabetmap = {}
-        alphabetsize = 0
+        if self.args.ngrams > 1:
+            self.alphabetmap[' '] = 1
+            alphabetsize = 1
+        else:
+            alphabetsize = 0
         for i, (char, freq) in enumerate(sorted(alphabet.items())):
             if freq >= self.args.alphafreq:
                 self.alphabetmap[char] = alphabetsize
@@ -502,7 +506,11 @@ class Corrector:
         except KeyError:
             freq = 0
         if freq > 0:
-            return freq, pattern in self.lexicon
+            if len(pattern) == 1:
+                inlexicon = pattern in self.lexicon
+            else:
+                inlexicon = all((unigram in self.lexicon for unigram in pattern.ngrams(1)))
+            return freq, inlexicon
         if pattern in self.lexicon:
             return self.args.lexfreq, True
         return 0, False
