@@ -369,7 +369,7 @@ class Corrector:
         if self.args.simple:
             #Simple approach
             self.applylm(candidatetree, testtokens)
-            results = [ {'text': w, 'candidates': candidatetree[i][1] } for i, w in enumerate(testtokens) ]
+            results = [ AttributeDict({'text': w, 'candidates': candidatetree[i][1] }) for i, w in enumerate(testtokens) ]
         else:
             #Full context-aware approach
             print("Decoding...", file=sys.stderr)
