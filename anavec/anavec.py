@@ -163,7 +163,10 @@ class Corrector:
         print("Loading background corpus from " + self.args.patternmodel, file=sys.stderr)
         begintime = time.time()
         self.classencoder = colibricore.ClassEncoder(self.args.classfile)
-        self.patternmodel = colibricore.UnindexedPatternModel(self.args.patternmodel) #background corpus
+        if self.args.ngrams == 1:
+            self.patternmodel = colibricore.UnindexedPatternModel(self.args.patternmodel, colibricore.PatternModelOptions(maxlength=1)) #background corpus
+        else:
+            self.patternmodel = colibricore.UnindexedPatternModel(self.args.patternmodel) #background corpus
         timer(begintime)
 
         print("Loading lexicon... ", file=sys.stderr)
