@@ -383,6 +383,20 @@ class Corrector:
                 topresults.append(hyp)
         return results
 
+    #def consolidate(self, candidatetree, testtokens):
+    #    print("Consolidating candidates...", file=sys.stderr)
+    #       for index in candidatetree:
+    #        candidate = candidatetree[index][1][0]
+    #        if candidate.correct:
+    #            for length in sorted(candidatetree.index):
+    #                if length > 1:
+    #                    if candidatetree[index][length][0].correct:
+    #                        #conflicting correctness
+
+
+
+
+
     def applylm(self, candidatetree, testtokens):
         """Applies the Language Model to favour certain candidates in the simple mode (superseded by full beam decoder)"""
         #we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
@@ -701,11 +715,16 @@ class CorrectionHypothesis:
         #if not self.covered[index]:
         nextindex = self.index + self.length
         if nextindex < self.decoder.length:
-            for length, candidates in self.decoder.candidatetree[nextindex].items():
+            nofurtherexpansion = False
+            for length, candidates in sorted(self.decoder.candidatetree[nextindex].items(), key=lambda x: x[0]):
                 for candidate in candidates:
                     yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
                     if candidate.correct:
-                        break #do not consider further alternatives if candidate is resolved as correct
+                        nofurtherexpansion = True
+                        break #do not consider further alternatives, neither for this element nor for any multispan elements, if candidate is resolved as correct
+                if nofurtherexpansion:
+                    nofurtherexpansion  = False
+                    break
 
 
     def __repr__(self):
