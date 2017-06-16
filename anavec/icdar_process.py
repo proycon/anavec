@@ -81,10 +81,11 @@ def process_task2(corrector, testfiles, positionfile, args):
         print("Running anavec on input: ", list(zip(testwords,mask, positions_extended)), file=sys.stderr)
         results = corrector.correct(testwords, mask) #results as presented by anavec
 
-        for result, testword, (charoffset, tokenlength) in zip(results, testwords, positions_extended):
-            assert result.text == testword
+        for index, testword, (charoffset, tokenlength) in zip(results['candidatetree'], testwords, positions_extended):
             if tokenlength > 0: #tokenlength == 0 occurs as a placeholder to signal tokens that were not in the position file
-                icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score for candidate in result.candidates }
+                candidates = results['candidatetree'][index][1][:args.options]
+                scoresum = sum( (candidate.score for candidate in candidates ) )
+                icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score for candidate in candidates }
 
     return icdar_results
 
@@ -93,6 +94,7 @@ def main():
     parser = argparse.ArgumentParser(description="ICDAR 2017 Post-OCR Correction Processing Script for Task 2 with Anavec", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--input', type=str, help="Input file or directory (*.txt files)", action='store',required=True)
     parser.add_argument('--positionfile', type=str, help="Input file with position information (erroneous_tokens_pos.json)", action='store',required=True)
+    parser.add_argument('--options', type=int, help="Maximum number of options to output", action='store',default=5)
     setup_argparser(parser) #for anavec
     args = parser.parse_args()
 

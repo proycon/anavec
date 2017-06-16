@@ -321,6 +321,7 @@ class Corrector:
         #We collect all candidates in a big candidate tree, where a list of candidates is stored for each test index, and each possible token length
         candidatetree = {} #index number => length => [candidates]
 
+
         for testword, state, index, length in testpatterns:
             if not index in candidatetree: candidatetree[index] = defaultdict(list)
             if state == InputTokenState.CORRECT:
@@ -328,7 +329,7 @@ class Corrector:
                 freqtuple = self.getfrequencytuple(testword)
                 assert length == 1
                 candidatetree[index][length].append(
-                    AttributeDict({'text':testword,'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmchoice':False})
+                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmselect':self.args.lmselect})
                 )
             else:
                 if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
@@ -365,22 +366,32 @@ class Corrector:
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
                         logprob = math.log10(score / confidencesum) #normalize to get a likelihood and log to get logprob
                         candidatetree[index][length].append(
-                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmchoice': False})
+                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmselect': False})
                         )
         timer(begintime)
 
-        if self.args.simple:
-            #Simple approach
-            self.applylm(candidatetree, testtokens)
-            results = [ AttributeDict({'text': w, 'candidates': candidatetree[i][1] }) for i, w in enumerate(testtokens) ]
-        else:
-            #Full context-aware approach
-            print("Decoding...", file=sys.stderr)
-            decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize)
-            topresults = []
-            results = {'top':topresults, 'candidatetree': candidatetree, 'testtokens': testtokens, 'mask': mask  } #contains the top n best results
-            for i, hyp in enumerate(decoder.decode(self.args.topn)):
-                topresults.append(hyp)
+        #Add correct 'candidates' for words that need no further correction:
+        for index, (testword, state) in enumerate(zip(testtokens, mask)):
+            if state == InputTokenState.CORRECT:
+                if not index in candidatetree: candidatetree[index] = defaultdict(list)
+                #Word is already correct and not to be tested, just look up some data and copy to output
+                freqtuple = self.getfrequencytuple(testword)
+                if len(candidatetree[index][1]) == 0:
+                    candidatetree[index][1].append(
+                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmselect':self.args.lmselect})
+                    )
+
+
+        if self.args.lmselect:
+            #Alternative LM selection method, if this is enabled the LM in the decoder later will be disabled
+            self.applylmselect(candidatetree, testtokens)
+
+        print("Decoding...", file=sys.stderr)
+        decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize)
+        topresults = []
+        results = {'top':topresults, 'candidatetree': candidatetree, 'testtokens': testtokens, 'mask': mask  } #contains the top n best results
+        for i, hyp in enumerate(decoder.decode(self.args.topn)):
+            topresults.append(hyp)
         return results
 
     #def consolidate(self, candidatetree, testtokens):
@@ -397,8 +408,8 @@ class Corrector:
 
 
 
-    def applylm(self, candidatetree, testtokens):
-        """Applies the Language Model to favour certain candidates in the simple mode (superseded by full beam decoder)"""
+    def applylmselect(self, candidatetree, testtokens):
+        """Applies the Language Model to favour certain candidates, in a local fashion. This is an alternative to the integrated LM in the decoder."""
         #we run words that are correctable (i.e. not marked correct), through a language model, using all candidate permutations (above a certain cut-off)
         print("Applying Language Model...", file=sys.stderr)
 
@@ -457,21 +468,21 @@ class Corrector:
 
                     #the best combination gets selected by the LM
                     for candidate in bestcombination:
-                        candidate.lmchoice = True
+                        candidate.lmselect = True
 
                     if self.args.debug: print("[DEBUG LM] Language model selected " + " ".join([candidate.text for candidate in bestcombination]) + " with a total score of ", besttotalscore,file=sys.stderr)
 
                     #reorder the candidates in the output so that the chosen candidate is always the first
                     #for result in results[i:i+span]:
-                    #    lmchoice = 0
+                    #    lmselect = 0
                     #    for j, candidate in enumerate(result.candidates):
                     #        if j == 0:
-                    #            if candidate.lmchoice:
+                    #            if candidate.lmselect:
                     #                break #nothing to do
-                    #        elif candidate.lmchoice:
-                    #            lmchoice = j
-                    #    if lmchoice != 0:
-                    #        result.candidates = [result.candidates[lmchoice]] + result.candidates[:lmchoice]  + result.candidates[lmchoice+1:]
+                    #        elif candidate.lmselect:
+                    #            lmselect = j
+                    #    if lmselect != 0:
+                    #        result.candidates = [result.candidates[lmselect]] + result.candidates[:lmselect]  + result.candidates[lmselect+1:]
 
                     leftcontext = leftcontext + [candidate.text for candidate in bestcombination] + rightcontext
                     if len(leftcontext) > 15: leftcontext = leftcontext[-15:]  #don't let it grow too big
@@ -486,16 +497,6 @@ class Corrector:
         print("Outputting JSON...", file=sys.stderr)
         print(json.dumps(results, indent=4, ensure_ascii=False))
 
-    def output_simple(self, results):
-        print("Outputting Text (use --json for full output in JSON)...", file=sys.stderr)
-        for result in results:
-            print(result['text'])
-            for candidate in result['candidates']:
-                print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])),end="")
-                if 'lmchoice' in candidate:
-                    print(" lmchoice=" + str(int(candidate.lmchoice)), end="")
-                print("]")
-
     def output(self, results):
         print("Outputting best text (use --json for full output in JSON or --report for a report in text)...", file=sys.stderr)
         if self.args.simple:
@@ -508,9 +509,17 @@ class Corrector:
         print("CANDIDATE TREE:")
         for index in results['candidatetree']:
             for length in results['candidatetree'][index]:
-                print("@" + str(index) + ":" + str(length) + " " + " ".join(results['testtokens'][index:index+length]))
-                for candidate in results['candidatetree'][index][length]:
-                    print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " logprob="+str(candidate.logprob) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])) + "]")
+                if len(results['candidatetree'][index][length]) > 0:
+                    print("@" + str(index) + ":" + str(length) + " " + " ".join(results['testtokens'][index:index+length]))
+                    if self.corrector.args.lmselect:
+                        candidates = sorted(results['candidatetree'][index][length], key=lambda x: x.lmselect * -1)
+                    else:
+                        candidates = results['candidatetree'][index][length]
+                    for candidate in candidates:
+                        print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " logprob="+str(candidate.logprob) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])),noend="")
+                        if self.corrector.args.lmselect:
+                            print(" lmselect=" + str(int(candidate.lmselect)), noend="")
+                        print("]")
         print("TOP RESULTS:")
         for i, result in enumerate(results['top']):
             print("RESULT #" + str(i+1) + ": " + str(result))
@@ -536,11 +545,11 @@ class Corrector:
     def trainingpatterns(self):
         """Iterate over all patterns in the training data (background corpus + lexicon)"""
         for pattern in self.patternmodel:
-            if (self.args.simple and len(pattern) == 1)  or (not self.args.simple and len(pattern) <= self.args.ngrams):  #in simple mode only unigrams, otherwise all
-                if self.patternmodel[pattern] > self.args.minfreq:
+            if len(pattern) <= self.args.ngrams:
+                if self.patternmodel[pattern] >= self.args.minfreq:
                     yield pattern
         for pattern in self.lexicon:
-            if ((self.args.simple and len(pattern) == 1)  or (not self.args.simple and len(pattern) <= self.args.ngrams)) and pattern not in self.patternmodel: #last condition prevents yielding duplicates
+            if len(pattern) <= self.args.ngrams and pattern not in self.patternmodel: #last condition prevents yielding duplicates
                 yield pattern
 
     def gettestpatterns(self, testtokens, mask):
@@ -558,7 +567,7 @@ class Corrector:
                     sequences.append(sequence)
                     sequence = []
 
-        if self.args.ngrams >= 1 and not self.args.simple:
+        if self.args.ngrams >= 1:
             if sequence: sequences.append(sequence) #sequences contains a sequence of consecutive correctable tokens
             if sequences:
                 for n in range(2,self.args.ngrams+1):
@@ -613,7 +622,7 @@ class StackDecoder:
     def decode(self, topn=1):
         for i, stack in enumerate(self):
             if i < self.length:
-                print("Decoding stack " + str(i) + "...", file=sys.stderr)
+                print("Decoding stack " + str(i) + " (" + str(len(stack.data)) + " hypotheses) ...", file=sys.stderr)
                 count = 0
                 while stack.data:
                     hypothesis = stack.pop()
@@ -654,23 +663,26 @@ class StackDecoder:
         self.maxprob = {}
         for index in range(0, self.length):
             for length in range(1, self.length-index+1):
-                try:
-                    candidates = self.candidatetree[index][length]
-                except KeyError:
-                    candidates = None
-                p = -9999
-                if candidates:
-                    if self.corrector.lm:
-                        p = max( ( self.corrector.args.correctionweight * candidate.logprob + self.corrector.args.lmweight * self.corrector.lm.score(candidate.text) for candidate in candidates ) )
-                    else:
-                        p = max( ( self.corrector.args.correctionweight * candidate.logprob for candidate in candidates ) )
-                self.maxprob[(index, length)] = p
+                if length == 1 and self.mask[index] == InputTokenState.CORRECT:
+                    self.maxprob[(index, length)] = 0
+                else:
+                    try:
+                        candidates = self.candidatetree[index][length]
+                    except KeyError:
+                        candidates = None
+                    p = -9999
+                    if candidates:
+                        if self.corrector.lm and not self.corrector.args.lmselect:
+                            p = max( ( self.corrector.args.correctionweight * candidate.logprob + self.corrector.args.lmweight * self.corrector.lm.score(candidate.text) for candidate in candidates ) )
+                        else:
+                            p = max( ( candidate.logprob for candidate in candidates ) )
+                    self.maxprob[(index, length)] = p
 
         #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
         #also assign cost to previously uncovered slices
         for index in range(0, self.length):
-            for length in range(2, self.length-index):
-                if (index, length) in self.maxprob.keys():
+            for length in range(2, self.length-index+1):
+                if (index, length) in self.maxprob:
                     p = self.maxprob[(index,length)]
                 else:
                     p = None #we have no cost for this cell yet
@@ -683,10 +695,9 @@ class StackDecoder:
                         except KeyError:
                             partitionsum = None
                             break
-                    if partitionsum is not None and p < partitionsum:
+                    if partitionsum is not None and partitionsum > p:
                         p = partitionsum #assigns the minimal partitionsum
-                if p is None or p < partitionsum:
-                    self.maxprob[(index, length)] = partitionsum
+                self.maxprob[(index, length)] = partitionsum
 
         print("Size of max prob matrix:",len(self.maxprob), file=sys.stderr)
         if self.corrector.args.debug:
@@ -714,17 +725,24 @@ class CorrectionHypothesis:
         #for index in range(0, self.decoder.length): # == number of target words
         #if not self.covered[index]:
         nextindex = self.index + self.length
-        if nextindex < self.decoder.length:
-            nofurtherexpansion = False
-            for length, candidates in sorted(self.decoder.candidatetree[nextindex].items(), key=lambda x: x[0]):
-                for candidate in candidates:
-                    yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
-                    if candidate.correct:
-                        nofurtherexpansion = True
-                        break #do not consider further alternatives, neither for this element nor for any multispan elements, if candidate is resolved as correct
-                if nofurtherexpansion:
-                    nofurtherexpansion  = False
-                    break
+        while nextindex < self.decoder.length:
+            found = False
+            if nextindex in self.decoder.candidatetree:
+                for length, candidates in sorted(self.decoder.candidatetree[nextindex].items(), key=lambda x: x[0]):
+                    nofurtherexpansion = False
+                    for candidate in candidates:
+                        found = True
+                        yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
+                        if candidate.correct:
+                            nofurtherexpansion = True
+                            break #do not consider further alternatives, neither for this element nor for any multispan elements, if candidate is resolved as correct
+                    if nofurtherexpansion:
+                        nofurtherexpansion  = False
+                        break
+            if found:
+                break
+            else:
+                nextindex += 1
 
 
     def __repr__(self):
@@ -757,7 +775,7 @@ class CorrectionHypothesis:
             self.correctionprob = self.parent.correctionprob + self.candidate.logprob
 
         #cost of the hypothesis thus far
-        if self.decoder.corrector.lm:
+        if self.decoder.corrector.lm and not self.decoder.corrector.args.lmselect:
             self.lmprob = self.decoder.corrector.lm.score(str(self)) #base 10 logprob
             self.prob = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * self.lmprob)
         else:
@@ -828,7 +846,8 @@ def setup_argparser(parser):
     parser.add_argument('--correctscore', type=float,help="The score the a word must reach to be considered correct", action='store',default=0.60,required=False)
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
-    parser.add_argument('--simple',action='store_true', help="Simple mode: use limited context only (if there is an LM), no n-gram support, do not employ a full beam decoder")
+    parser.add_argument('--lmselect',action='store_true', help="Use the LM to select a preferred candidate in each candidate list")
+    parser.add_argument('--nodecode',action='store_false',dest='decode', help="Do not use a full beam decoder. But use limited context only if there is an LM (--lmselect automatically enabled). This implies no n-gram support.")
     parser.add_argument('--report',action='store_true', help="Output a full report")
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('--noout',dest='output',action='store_false', help="Do not output")
@@ -847,10 +866,7 @@ def main():
         corrector.output_json(results)
     elif args.output:
         if args.report:
-            if args.simple:
-                corrector.output_simple(results)
-            else:
-                corrector.output_report(results)
+            corrector.output_report(results)
         corrector.output(results)
 
 if __name__ == '__main__':
