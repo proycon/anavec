@@ -41,7 +41,8 @@ setup(
     entry_points = {
         'console_scripts': [
             'anavec = anavec.anavec:main',
-            'anavec_icdar_task2 = anavec.icdar_process:main'
+            'anavec_icdar_task2 = anavec.icdar_process:main',
+            'anavec_test = anavec.test:main'
         ]
     },
     package_data = {'anavec':[] },

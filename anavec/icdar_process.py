@@ -81,11 +81,19 @@ def process_task2(corrector, testfiles, positionfile, args):
         print("Running anavec on input: ", list(zip(testwords,mask, positions_extended)), file=sys.stderr)
         results = corrector.correct(testwords, mask) #results as presented by anavec
 
-        for index, testword, (charoffset, tokenlength) in zip(results['candidatetree'], testwords, positions_extended):
+        assert len(results['candidatetree']) == len(testwords)
+        assert len(positions_extended) == len(testwords)
+
+        for index, testword, (charoffset, tokenlength) in zip(sorted(results['candidatetree']), testwords, positions_extended):
+            print("[DEBUG] ", index, testword, charoffset, tokenlength,file=sys.stderr)
             if tokenlength > 0: #tokenlength == 0 occurs as a placeholder to signal tokens that were not in the position file
                 candidates = results['candidatetree'][index][1][:args.options]
                 scoresum = sum( (candidate.score for candidate in candidates ) )
-                icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score for candidate in candidates }
+                icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score/scoresum for candidate in candidates }
+
+        print("Best result for " + testfile + ":",file=sys.stderr)
+        corrector.output(results, file=sys.stderr)
+        print("\n\n\n")
 
     return icdar_results
 
