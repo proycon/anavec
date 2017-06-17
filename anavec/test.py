@@ -48,6 +48,7 @@ def main():
     goals = []
     for result, (testwords, mask) in zip(corrector.correct(alltestwords, allmask), references):
         output = list(sorted(result['candidatetree'][2][1], key=lambda x: -1 * x.score))[0].text
+        print("[DEBUG] ", result['offset'])
         print("\t" + testwords[2] + "\t-->\t" + "\t".join([ c.text for c in sorted(result['candidatetree'][2][1], key=lambda x: -1 *x.score)]))
         observations.append(output)
         goals.append(testwords[2])

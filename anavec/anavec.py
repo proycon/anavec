@@ -400,6 +400,7 @@ class Corrector:
                     topresults.append(hyp)
                 timer(begintime)
                 yield {'offset': begin,'top':topresults, 'candidatetree': { k-begin:v for k, v in candidatetree.items() if k >=begin and k<=i}, 'testtokens': testtokens_slice, 'mask': mask_slice  } #contains the top n best results
+                begin = i + 1
 
 
 
@@ -667,7 +668,7 @@ class StackDecoder:
         self.maxprob = {}
         for index in range(0, self.length):
             for length in range(1, self.length-index+1):
-                if length == 1 and self.mask[index] & InputTokenState.CORRECT:
+                if length == 1 and self.mask[self.offset+index] & InputTokenState.CORRECT:
                     self.maxprob[(index, length)] = 0
                 else:
                     try:
