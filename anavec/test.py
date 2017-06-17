@@ -30,7 +30,7 @@ def main():
     with open(args.referencefile, 'r',encoding='utf-8') as f:
         windowmask = [InputTokenState.CORRECT]*2 + [InputTokenState.CORRECTABLE] + [InputTokenState.CORRECT, InputTokenState.CORRECT | InputTokenState.EOL ]
         for line in f:
-            fields = line.split('#')
+            fields = line.strip().split('#')
             error = fields[0]
             correction = fields[1]
             context = fields[2].split(' ')
@@ -42,13 +42,14 @@ def main():
     l =  len(references)
     print("Read " + str(l) + " reference instances",file=sys.stderr)
 
+    assert len(alltestwords) == len(allmask)
+
     corrector = Corrector(**vars(args))
 
     observations = []
     goals = []
     for result, (testwords, mask) in zip(corrector.correct(alltestwords, allmask), references):
         output = list(sorted(result['candidatetree'][2][1], key=lambda x: -1 * x.score))[0].text
-        print("[DEBUG] ", result['offset'])
         print("\t" + testwords[2] + "\t-->\t" + "\t".join([ c.text for c in sorted(result['candidatetree'][2][1], key=lambda x: -1 *x.score)]))
         observations.append(output)
         goals.append(testwords[2])

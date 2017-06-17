@@ -255,7 +255,7 @@ class Corrector:
         if self.args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", self.trainingdata.shape)
 
     def correct(self, testtokens, mask=None):
-        """Correct the testtokens (a list of strings in a pseudo-tokenised representation), an empty element or "\n" element is allowed as an explicit sentence seperator.
+        """Correct the testtokens (a list of strings in a pseudo-tokenised representation)
 
         The optional mask parameter is an equally-sized sequence, corresponding to the testwords, that
         fine-tunes which words to correct, indicated by the following values:
@@ -284,7 +284,7 @@ class Corrector:
         distancematrix = compute_vector_distances(self.trainingdata, testdata)
         timer(begintime)
 
-        print("Collecting matching anagrams", file=sys.stderr)
+        print("Collecting matching anagrams...", file=sys.stderr)
         begintime = time.time()
         matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
         testinstance = 0
@@ -305,7 +305,7 @@ class Corrector:
                 matchinganagramhashes[h].add((testword, distance))
         timer(begintime)
 
-        print("Resolving anagram hashes to candidates", file=sys.stderr)
+        print("Resolving anagram hashes to candidates...", file=sys.stderr)
         begintime = time.time()
         candidates = defaultdict(list) #maps test words to  candidates (str => [str])
         for pattern in self.trainingpatterns():
@@ -391,15 +391,12 @@ class Corrector:
         for i, state in enumerate(mask):
             if state & InputTokenState.EOL or i == len(mask) - 1:
                 begintime = time.time()
-                testtokens_slice = testtokens[begin:i+1]
-                mask_slice = mask[begin:i+1]
-                print("Decoding @"+str(begin)+":"+str(i-begin+1) + ":", file=sys.stderr)
-                decoder = StackDecoder(self, testtokens_slice, mask_slice, candidatetree, self.args.beamsize, offset=begin, length=i-begin+1)
+                decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize, offset=begin, length=(i-begin)+1)
                 topresults = []
-                for i, hyp in enumerate(decoder.decode(self.args.topn)):
+                for hyp in decoder.decode(self.args.topn):
                     topresults.append(hyp)
                 timer(begintime)
-                yield {'offset': begin,'top':topresults, 'candidatetree': { k-begin:v for k, v in candidatetree.items() if k >=begin and k<=i}, 'testtokens': testtokens_slice, 'mask': mask_slice  } #contains the top n best results
+                yield {'offset': begin,'top':topresults, 'candidatetree': { k-begin:v for k, v in candidatetree.items() if k >=begin and k<=i}, 'testtokens': decoder.testwords, 'mask': decoder.mask  } #contains the top n best results
                 begin = i + 1
 
 
@@ -608,6 +605,9 @@ class StackDecoder:
             self.mask = mask
             self.length = len(self.testwords)
             self.offset = 0
+        print("Setting up decoder @"+str(self.offset)+":"+str(self.length) + ": ", self.testwords, file=sys.stderr)
+        assert len(self.testwords) == self.length
+        assert len(self.mask) == self.length
         self.candidatetree = candidatetree
         self.beamsize = beamsize
         self.computemaxprob()
@@ -618,6 +618,7 @@ class StackDecoder:
         self.stacks[0].append(CorrectionHypothesis(None,0,0,self))
 
     def decode(self, topn=1):
+        print("Decoding @"+str(self.offset)+":"+str(self.length) + ": ", self.testwords, file=sys.stderr)
         for i, stack in enumerate(self):
             if i < self.length:
                 print("Decoding stack " + str(i) + " (" + str(len(stack.data)) + " hypotheses) ...", file=sys.stderr)
@@ -626,7 +627,15 @@ class StackDecoder:
                     hypothesis = stack.pop()
                     for newhypothesis in hypothesis.expand():
                         count += 1
-                        self.stacks[newhypothesis.coverage()].append(newhypothesis)
+                        coverage = newhypothesis.coverage()
+                        try:
+                            self.stacks[coverage].append(newhypothesis)
+                        except IndexError:
+                            print("UNABLE to insert hypothesis  with coverage ", coverage,file=sys.stderr)
+                            print("Stack sizes: " + str(i)+ ": ", [ (i, len(s)) for i, s in enumerate(self.stacks) ], file=sys.stderr)
+                            print("Hypothesis: ", repr(newhypothesis),file=sys.stderr)
+                            raise
+
                 print(" (" + str(count) + " hypotheses generated after decoding stack " + str(i) + ")", file=sys.stderr)
                 if self.corrector.args.debug: print("[DEBUG] Stack sizes after decoding stack " + str(i)+ ": ", [ (i, len(s)) for i, s in enumerate(self.stacks) ])
         for i in range(0,topn):
@@ -668,7 +677,7 @@ class StackDecoder:
         self.maxprob = {}
         for index in range(0, self.length):
             for length in range(1, self.length-index+1):
-                if length == 1 and self.mask[self.offset+index] & InputTokenState.CORRECT:
+                if length == 1 and self.mask[index] & InputTokenState.CORRECT:
                     self.maxprob[(index, length)] = 0
                 else:
                     try:
@@ -729,11 +738,11 @@ class CorrectionHypothesis:
     def expand(self):
         #for index in range(0, self.decoder.length): # == number of target words
         #if not self.covered[index]:
-        nextindex = self.decoder.offset + self.index + self.length
-        while nextindex < self.decoder.offset + self.decoder.length:
+        nextindex = self.index + self.length
+        while nextindex < self.decoder.length:
             found = False
             if nextindex in self.decoder.candidatetree:
-                for length, candidates in sorted(self.decoder.candidatetree[nextindex].items(), key=lambda x: x[0]):
+                for length, candidates in sorted(self.decoder.candidatetree[self.decoder.offset+nextindex].items(), key=lambda x: x[0]):
                     nofurtherexpansion = False
                     for candidate in candidates:
                         found = True
