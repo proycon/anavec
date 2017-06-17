@@ -60,8 +60,8 @@ def main():
         goals.append(reference)
 
     evaluation = ClassEvaluation(goals, observations)
-    print("Precision: ", evaluation.precision(),file=sys.stderr)
-    print("Recall: ", evaluation.recall(),file=sys.stderr)
+    print("# Precision = ", evaluation.precision())
+    print("# Recall = ", evaluation.recall())
 
 if __name__ == '__main__':
     main()
