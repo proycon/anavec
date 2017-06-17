@@ -287,8 +287,6 @@ class Corrector:
         print("Collecting matching anagrams...", file=sys.stderr)
         begintime = time.time()
         matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
-        testinstance = 0
-        getdistancematrix = iter(distancematrix)
         for (testword, state, index, length), distances in zip(testpatterns,distancematrix):
             #- testword is the actual text (str) of the pattern, usually a word
             #- index is the index in the original testwords
