@@ -83,8 +83,15 @@ optional arguments:
   -k NEIGHBOURS, --neighbours NEIGHBOURS, --neighbors NEIGHBOURS
                         Maximum number of anagram distances to consider (the
                         actual amount of anagrams is likely higher) (default:
-                        2)
+                        3)
+  -K CANDIDATES, --candidates CANDIDATES
+                        Maximum number of candidates to consider per input
+                        token/pattern (default: 100)
   -n TOPN, --topn TOPN  Maximum number of candidates to return (default: 10)
+  -N NGRAMS, --ngrams NGRAMS
+                        N-grams to consider (max value of n). Ensure that your
+                        background corpus is trained for at least the same
+                        length for this to have any effect! (default: 3)
   -D MAXLD, --maxld MAXLD
                         Maximum levenshtein distance (default: 5)
   -t MINFREQ, --minfreq MINFREQ
@@ -94,6 +101,8 @@ optional arguments:
                         Minimum alphabet frequency threshold (occurrence
                         count); characters occuring less are not considered in
                         the anagram vectors (default: 10)
+  -b BEAMSIZE, --beamsize BEAMSIZE
+                        Beamsize for the decoder (default: 100)
   --lexfreq LEXFREQ     Artificial frequency (occurrence count) for items in
                         the lexicon that are not in the background corpus
                         (default: 1)
@@ -120,6 +129,12 @@ optional arguments:
   --unkweight UNKWEIGHT
                         Unknown character weight for anagram vector
                         representation (default: 1)
+  --lmwin               Boost the scores of the LM selection just prior to
+                        output (default: False)
+  --locallm             Use a local LM to select a preferred candidate in each
+                        candidate list instead of the LM integrated in the
+                        decoder (default: False)
+  --report              Output a full report (default: False)
   --json                Output JSON (default: False)
   --noout               Do not output (default: True)
   -d, --debug

@@ -37,7 +37,7 @@ def main():
             windowwords = context[:2] + [error] + context[2:]
             alltestwords += windowwords
             allmask += windowmask
-            references.append( (windowwords, windowmask) )
+            references.append( (windowwords, windowmask, correction) )
 
     l =  len(references)
     print("Read " + str(l) + " reference instances",file=sys.stderr)
@@ -48,11 +48,16 @@ def main():
 
     observations = []
     goals = []
-    for result, (testwords, mask) in zip(corrector.correct(alltestwords, allmask), references):
-        output = list(sorted(result['candidatetree'][2][1], key=lambda x: -1 * x.score))[0].text
-        print("\t" + testwords[2] + "\t-->\t" + "\t".join([ c.text for c in sorted(result['candidatetree'][2][1], key=lambda x: -1 *x.score)]))
+    for result, (testwords, mask, reference) in zip(corrector.correct(alltestwords, allmask), references):
+        output = list(sorted(result['candidatetree'][2][1], key=lambda x: -1 * x.score))
+        if output:
+            output = output[0].text
+            print("\t" + testwords[2] + "\t-->\t" + "\t".join([ c.text for c in sorted(result['candidatetree'][2][1], key=lambda x: -1 *x.score)]))
+        else:
+            output = ""
+            print("\t" + testwords[2] + "\t-->\tNO-SUGGESTIONS!")
         observations.append(output)
-        goals.append(testwords[2])
+        goals.append(reference)
 
     evaluation = ClassEvaluation(goals, observations)
     print("Precision: ", evaluation.precision(),file=sys.stderr)
