@@ -46,8 +46,6 @@ def process_task2(corrector, testfiles, positionfile, args):
         text = loadtext(testfile)
         tokens = text.split(' ')
 
-        result = {} #this will store the results
-
         #greedy match over all 3,2,1-grams, in that order
         charoffset = 0
         testwords = []
@@ -79,21 +77,22 @@ def process_task2(corrector, testfiles, positionfile, args):
 
 
         print("Running anavec on input: ", list(zip(testwords,mask, positions_extended)), file=sys.stderr)
-        results = corrector.correct(testwords, mask) #results as presented by anavec
 
-        assert len(results['candidatetree']) == len(testwords)
-        assert len(positions_extended) == len(testwords)
+        for results in corrector.correct(testwords, mask): #results as presented by anavec (should only do one iteration as each input is on one line)
 
-        for index, testword, (charoffset, tokenlength) in zip(sorted(results['candidatetree']), testwords, positions_extended):
-            print("[DEBUG] ", index, testword, charoffset, tokenlength,file=sys.stderr)
-            if tokenlength > 0: #tokenlength == 0 occurs as a placeholder to signal tokens that were not in the position file
-                candidates = results['candidatetree'][index][1][:args.options]
-                scoresum = sum( (candidate.score for candidate in candidates ) )
-                icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score/scoresum for candidate in candidates }
+            assert len(results['candidatetree']) == len(testwords)
+            assert len(positions_extended) == len(testwords)
 
-        print("Best result for " + testfile + ":",file=sys.stderr)
-        corrector.output(results, file=sys.stderr)
-        print("\n\n\n")
+            for index, testword, (charoffset, tokenlength) in zip(sorted(results['candidatetree']), testwords, positions_extended):
+                print("[DEBUG] ", index, testword, charoffset, tokenlength,file=sys.stderr)
+                if tokenlength > 0: #tokenlength == 0 occurs as a placeholder to signal tokens that were not in the position file
+                    candidates = results['candidatetree'][index][1][:args.options]
+                    scoresum = sum( (candidate.score for candidate in candidates ) )
+                    icdar_results[testfile][str(charoffset)+":"+str(tokenlength)] = { candidate.text: candidate.score/scoresum for candidate in candidates }
+
+            print("Best result for " + testfile + ":",file=sys.stderr)
+            corrector.output(results, file=sys.stderr)
+            print("\n\n\n")
 
     return icdar_results
 
@@ -101,8 +100,9 @@ def process_task2(corrector, testfiles, positionfile, args):
 def main():
     parser = argparse.ArgumentParser(description="ICDAR 2017 Post-OCR Correction Processing Script for Task 2 with Anavec", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--input', type=str, help="Input file or directory (*.txt files)", action='store',required=True)
-    parser.add_argument('--positionfile', type=str, help="Input file with position information (erroneous_tokens_pos.json)", action='store',required=True)
+    parser.add_argument('--positionfile', type=str, help="Input file with position information (erroneous_tokens_pos.json), required for task 2", action='store',required=False)
     parser.add_argument('--options', type=int, help="Maximum number of options to output", action='store',default=5)
+    parser.add_argument('--task', type=int, help="Task", action='store',required=True)
     setup_argparser(parser) #for anavec
     args = parser.parse_args()
 
@@ -114,7 +114,10 @@ def main():
         testfiles = [args.input]
 
     corrector = Corrector(**vars(args))
-    results = process_task2(corrector, testfiles, args.positionfile, args)
+    if args.task == 2:
+        results = process_task2(corrector, testfiles, args.positionfile, args)
+    else:
+        raise NotImplementedError
 
     #Output results as JSON to stdout
     print(json.dumps(results, ensure_ascii=False, indent=4))
