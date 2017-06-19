@@ -135,12 +135,17 @@ def pretokenizer(text):
     for begin, end in rawtokens:
 
         punctail = ""
-        for i, c in enumerate(reversed(rawtoken)):
+        breakpoint = None
+        for i, c in enumerate(reversed(text[begin:end])):
             if c.isalnum():
+                breakpoint = i
                 break
             else:
                 punctail = c + punctail
-        tokens.append( ( text[begin:begin+len(rawtoken) - i], begin, len(text), punctail) )
+        if breakpoint is not None:
+            tokens.append( ( text[begin:end - breakpoint], begin, end, punctail) )
+        else:
+            tokens.append( ( text[begin:end], begin, end, "") )
 
     return tokens
 
