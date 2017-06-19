@@ -906,7 +906,7 @@ def readinput(lines, istokenized):
     testwords = []
     mask = []
     positions = []
-    for line in sys.stdin.readlines():
+    for line in lines:
         if not istokenized:
             tokenizedline = pretokenizer(line)
             for token, begin, end, punctail in tokenizedline:
