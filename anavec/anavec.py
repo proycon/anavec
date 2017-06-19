@@ -696,7 +696,7 @@ class StackDecoder:
         #note that in this function we minimize rather than maximize as we are useing logprobs everywhere
 
         splits = {}
-        for n in range(2, self.length+1):
+        for n in range(2, self.corrector.args.ngrams+1):
             splits[n] = list(possiblesplits(n))
 
         #populate the maxprob matrix with costs directly from the candidates
@@ -721,23 +721,28 @@ class StackDecoder:
         #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
         #also assign cost to previously uncovered slices
         for index in range(0, self.length):
-            for length in range(2, self.length-index+1):
+            for length in range(2, self.corrector.args.ngrams+1):
+                if index+length>self.length:
+                    continue
                 if (index, length) in self.maxprob:
                     p = self.maxprob[(index,length)]
                 else:
                     p = None #we have no cost for this cell yet
-                for partition in splits[length]:
-                    partitionsum = 0
-                    for subindex, sublength in partition:
-                        subindex = index + subindex
-                        try:
-                            partitionsum += self.maxprob[(subindex, sublength)]
-                        except KeyError:
-                            partitionsum = None
-                            break
+                if length <= self.corrector.args.ngrams:
+                    for partition in splits[length]:
+                        partitionsum = 0
+                        for subindex, sublength in partition:
+                            subindex = index + subindex
+                            try:
+                                partitionsum += self.maxprob[(subindex, sublength)]
+                            except KeyError:
+                                partitionsum = None
+                                break
                     if partitionsum is not None and partitionsum > p:
                         p = partitionsum #assigns the minimal partitionsum
                 self.maxprob[(index, length)] = partitionsum
+
+
 
         print("Size of max prob matrix:",len(self.maxprob), file=sys.stderr)
         if self.corrector.args.debug:
@@ -835,7 +840,11 @@ class CorrectionHypothesis:
         #length = 1
         #retrieve future cost for all consecutive uncovered parts
         if self.index + self.length < self.decoder.length:
-            self.futureprob += self.decoder.maxprob[(self.index+self.length, self.decoder.length - (self.index+self.length))]
+            uncoveredspan = (self.index+self.length, self.decoder.length - (self.index+self.length))
+            if uncoveredspan in self.decoder.maxprob:
+                self.futureprob += self.decoder.maxprob[uncoveredspan]
+            else:
+                self.futureprob += sum( self.decoder.maxprob[(i,1)] for i in range(self.index+self.length, self.decoder.length) )
         #for i, indexcovered in enumerate(self.covered):
         #    if not indexcovered:
         #        #position is uncovered
