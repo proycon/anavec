@@ -13,7 +13,7 @@ import argparse
 import sys
 import glob
 import json
-from anavec.anavec import Corrector, setup_argparser, InputTokenState
+from anavec.anavec import Corrector, setup_argparser, InputTokenState, readinput
 
 def loadtext(testfile):
     """Load the text from a test file"""
@@ -30,6 +30,49 @@ def readpositiondata(positionfile):
     with open(positionfile,'r',encoding='utf-8') as f:
         positiondata = json.load(f)
     return positiondata
+
+
+
+def process_task1(corrector, testfiles, args):
+    icdar_results = {} #results as per challenge specification
+
+    for testfile in testfiles:
+        print(" === PROCESSING " + testfile + " === ",file=sys.stderr)
+        icdar_results[testfile] = {} #results as per challenge specification
+
+        text = loadtext(testfile)
+
+        lines = text.strip('\n').split('\n') #should actually only split into one item for this task
+        assert len(lines) == 1
+        testtokens, mask, positions = readinput(lines, False)
+
+        result = corrector.correct(testtokens, mask)
+        for candidate in result['top'][0]:
+            if candidate.error:
+                index = candidate.index
+                beginchar, endchar, punctail = positions[index]
+                assert beginchar is not None
+
+                tokenlength = candidate.length #in tokens
+                correction = candidate.text
+                if tokenlength > 1:
+                    #we cover multiple tokens, but our tokens may be more split than in the original tokenisation
+                    #find the original token length
+                    origtokenlength = 0
+                    for i, (beginchar2,endchar2,punctail2) in enumerate(positions[index:]):
+                        if beginchar2 is not None:
+                            if i == tokenlength:
+                                break
+                            origtokenlength += 1
+                            punctail = punctail2
+                            endchar = endchar2
+
+                #re-add any punctuation
+                correction += punctail
+                original = text[beginchar:endchar]
+                print("[" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
+                icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
+
 
 def process_task2(corrector, testfiles, positionfile, args):
     positiondata = readpositiondata(positionfile)
@@ -113,7 +156,9 @@ def main():
         testfiles = [args.input]
 
     corrector = Corrector(**vars(args))
-    if args.task == 2:
+    if args.task == 1:
+        results = process_task1(corrector, testfiles, args)
+    elif args.task == 2:
         results = process_task2(corrector, testfiles, args.positionfile, args)
     else:
         raise NotImplementedError
