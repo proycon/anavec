@@ -46,7 +46,6 @@ def process_task2(corrector, testfiles, positionfile, args):
         text = loadtext(testfile)
         tokens = text.split(' ')
 
-        #greedy match over all 3,2,1-grams, in that order
         charoffset = 0
         testwords = []
         mask = []
