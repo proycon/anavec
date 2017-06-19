@@ -351,7 +351,7 @@ class Corrector:
                 freqtuple = self.getfrequencytuple(testword)
                 assert length == 1
                 candidatetree[index][length].append(
-                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmselect':bool(self.args.lm)})
+                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm)})
                 )
             else:
                 if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
@@ -388,7 +388,7 @@ class Corrector:
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
                         logprob = math.log10(score / confidencesum) #normalize to get a likelihood and log to get logprob
                         candidatetree[index][length].append(
-                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmselect': False})
+                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmselect': False})
                         )
         timer(begintime)
 
@@ -400,7 +400,7 @@ class Corrector:
                 freqtuple = self.getfrequencytuple(testword)
                 if len(candidatetree[index][1]) == 0:
                     candidatetree[index][1].append(
-                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'correct':1, 'lmselect':bool(self.args.lm)})
+                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm)})
                     )
 
 
@@ -525,7 +525,7 @@ class Corrector:
                     print("@" + str(index) + ":" + str(length) + " " + " ".join(results['testtokens'][index:index+length]))
                     candidates = sorted(results['candidatetree'][index][length], key=lambda x: x.lmselect * -1)
                     for candidate in candidates:
-                        print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " logprob="+str(candidate.logprob) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " correct=" + str(int(candidate['correct'])),end="")
+                        print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " logprob="+str(candidate.logprob) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " error=" + str(int(candidate['error'])) + " correct=" + str(int(candidate['correct'])),end="")
                         if self.args.lm:
                             print(" lmselect=" + str(int(candidate.lmselect)), end="")
                         print("]")
@@ -900,23 +900,26 @@ def setup_argparser(parser):
 def readinput(lines, istokenized):
     testwords = []
     mask = []
+    positions = []
     for line in sys.stdin.readlines():
         if not istokenized:
             tokenizedline = pretokenizer(line)
             for token, begin, end, punctail in tokenizedline:
                 testwords.append( token )
                 mask.append( InputTokenState.CORRECTABLE )
+                positions.append( (begin, end, punctail) )
                 if punctail:
                     #trailing punctuation becomes a separate token
                     testwords.append( punctail )
                     mask.append( InputTokenState.CORRECTABLE | InputTokenState.PUNCTAIL )
+                    positions.append( (None,None,None) )
             mask[-1] |= InputTokenState.EOL
         else:
             tokens  = [ w.strip() for w in line.split(' ') if w.strip() ]
             testwords += rawtokens
             mask += [ InputTokenState.CORRECTABLE ] * len(words)
             mask[-1] |= InputTokenState.EOL
-    return testwords, mask
+    return testwords, mask, positions
 
 def main():
     parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -926,7 +929,7 @@ def main():
 
     print("Reading from standard input (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
 
-    testwords, mask = readinput(sys.stdin.readlines(), args.tok)
+    testwords, mask, _  = readinput(sys.stdin.readlines(), args.tok)
 
     if args.json:
         print("[")
