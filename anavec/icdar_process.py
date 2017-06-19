@@ -46,7 +46,7 @@ def process_task1(corrector, testfiles, args):
         assert len(lines) == 1
         testtokens, mask, positions = readinput(lines, False)
 
-        result = corrector.correct(testtokens, mask)
+        result = next(corrector.correct(testtokens, mask))
         for candidate in result['top'][0]:
             if candidate.error:
                 index = candidate.index
@@ -72,6 +72,8 @@ def process_task1(corrector, testfiles, args):
                 original = text[beginchar:endchar]
                 print("[" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
                 icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
+
+        return icdar_results
 
 
 def process_task2(corrector, testfiles, positionfile, args):
