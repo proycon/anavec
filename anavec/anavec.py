@@ -37,6 +37,7 @@ class InputTokenState:
     CORRECT = 1 #The input word is correct, nothing is to be done for it (it is only used as context)
     INCORRECT = 2 #The input word is explicitly incorrect, it has to be corrected
     EOL = 4 #The input word is the end of the line
+    PUNCTAIL = 8 #Token is trailing punctuation that was joined to the previous token in the original
 
 
 def compute_vector_distances(trainingdata, testdata):
@@ -120,6 +121,28 @@ def combinations(l):
             for y in combinations(tail):
                 yield [x] + y
 
+def pretokenizer(text):
+    begin = 0
+    rawtokens = []
+    for i, c in enumerate(text):
+        if c == ' ' and begin < i:
+            rawtokens.append( (begin,i) )
+            begin = i+1
+    if begin:
+        rawtokens.append( (begin,len(text)) )
+
+    tokens = []
+    for begin, end in rawtokens:
+
+        punctail = ""
+        for i, c in enumerate(reversed(rawtoken)):
+            if c.isalnum():
+                break
+            else:
+                punctail = c + punctail
+        tokens.append( ( text[begin:begin+len(rawtoken) - i], begin, len(text), punctail) )
+
+    return tokens
 
 
 class Corrector:
@@ -869,8 +892,31 @@ def setup_argparser(parser):
     parser.add_argument('--locallm',action='store_true', help="Use a local LM to select a preferred candidate in each candidate list instead of the LM integrated in the decoder")
     parser.add_argument('--report',action='store_true', help="Output a full report")
     parser.add_argument('--json',action='store_true', help="Output JSON")
+    parser.add_argument('--tok',action='store_true', help="Input is already tokenized")
     parser.add_argument('--noout',dest='output',action='store_false', help="Do not output")
     parser.add_argument('-d', '--debug',action='store_true')
+
+
+def readinput(lines, istokenized):
+    testwords = []
+    mask = []
+    for line in sys.stdin.readlines():
+        if not istokenized:
+            tokenizedline = pretokenizer(line)
+            for token, begin, end, punctail in tokenizedline:
+                testwords.append( token )
+                mask.append( InputTokenState.CORRECTABLE )
+                if punctail:
+                    #trailing punctuation becomes a separate token
+                    testwords.append( punctail )
+                    mask.append( InputTokenState.CORRECTABLE | InputTokenState.PUNCTAIL )
+            mask[-1] |= InputTokenState.EOL
+        else:
+            tokens  = [ w.strip() for w in line.split(' ') if w.strip() ]
+            testwords += rawtokens
+            mask += [ InputTokenState.CORRECTABLE ] * len(words)
+            mask[-1] |= InputTokenState.EOL
+    return testwords, mask
 
 def main():
     parser = argparse.ArgumentParser(description="", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -880,13 +926,7 @@ def main():
 
     print("Reading from standard input (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
 
-    testwords = []
-    mask = []
-    for line in sys.stdin.readlines():
-        words  = [ w.strip() for w in line.split(' ') if w.strip() ]
-        testwords += words
-        mask += [ InputTokenState.CORRECTABLE ] * len(words)
-        mask[-1] |= InputTokenState.EOL
+    testwords, mask = readinput(sys.stdin.readlines(), args.tok)
 
     if args.json:
         print("[")
