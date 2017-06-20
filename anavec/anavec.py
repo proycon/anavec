@@ -68,7 +68,7 @@ def compute_vector_distances(trainingdata, testdata):
     #nearests_fn = theano.function([x, y], bestIndices, profile=False)
     #return nearests_fn(trainingdata, testdata)
 
-    squaredpwdist_fn = theano.function([x, y], T.transpose(squaredPairwiseDistances), profile=False)
+    squaredpwdist_fn = theano.function([x, y], [T.transpose(squaredPairwiseDistances), T.transpose(T.argsort(squaredPairwiseDistances))] , profile=False)
 
 
     return squaredpwdist_fn(trainingdata, testdata)
@@ -309,25 +309,26 @@ class Corrector:
 
         print("Computing vector distances between test and trainingdata...", file=sys.stderr)
         begintime = time.time()
-        distancematrix = compute_vector_distances(self.trainingdata, testdata)
+        distancematrix, bestindexmatrix = compute_vector_distances(self.trainingdata, testdata)
         timer(begintime)
 
         print("Collecting matching anagrams...", file=sys.stderr)
         begintime = time.time()
         matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
-        for (testword, state, index, length), distances in zip(testpatterns,distancematrix):
+        for i, ((testword, state, index, length), bestindices) in enumerate(zip(testpatterns, bestindexmatrix)):
             #- testword is the actual text (str) of the pattern, usually a word
             #- index is the index in the original testwords
             #- length is the length of the pattern (in tokens)
 
             #distances contains the distances between testword and all training instances
-            #we extract the top k:
+            #we extract the top k **distances**:
             matchingdistances = set()
-            for distance, trainingindex in sorted(( (x,j) for j,x in enumerate(distances) )): #MAYBE TODO: delegate to numpy/theano if too slow?
+            for trainindex in bestindices[:1000]:
+                distance = distancematrix[i][trainindex]
                 matchingdistances.add(distance)
                 if len(matchingdistances) > self.args.neighbours:
                     break
-                h = anahash_fromvector(self.trainingdata[trainingindex])
+                h = anahash_fromvector(self.trainingdata[trainindex])
                 matchinganagramhashes[h].add((testword, distance))
         timer(begintime)
 
@@ -889,6 +890,7 @@ def setup_argparser(parser):
     parser.add_argument('-n','--topn', type=int,help="Maximum number of candidates to return", action='store',default=10,required=False)
     parser.add_argument('-N','--ngrams', type=int,help="N-grams to consider (max value of n). Ensure that your background corpus is trained for at least the same length for this to have any effect!", action='store',default=3,required=False)
     parser.add_argument('-D','--maxld', type=int,help="Maximum levenshtein distance", action='store',default=5,required=False)
+    parser.add_argument('-M','--maxvd', type=int,help="Maximum vector distance", action='store',default=5,required=False)
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
     parser.add_argument('-a','--alphafreq', type=int,help="Minimum alphabet frequency threshold (occurrence count); characters occuring less are not considered in the anagram vectors", action='store',default=10,required=False)
     parser.add_argument('-b','--beamsize', type=int,help="Beamsize for the decoder", action='store',default=100,required=False)
