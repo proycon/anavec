@@ -124,7 +124,7 @@ def combinations(l):
 def pretokenizer(text):
     begin = 0
     rawtokens = []
-    for i, c in enumerate(text):
+    for i, c in enumerate(text.strip()):
         if c == ' ' and begin < i:
             rawtokens.append( (begin,i) )
             begin = i+1
@@ -711,13 +711,12 @@ class StackDecoder:
                         candidates = self.candidatetree[self.offset+index][length]
                     except KeyError:
                         candidates = None
-                    p = -9999
                     if candidates:
                         if self.corrector.lm and not self.corrector.args.locallm:
                             p = max( ( self.corrector.args.correctionweight * candidate.logprob + self.corrector.args.lmweight * self.corrector.lm.score(candidate.text) for candidate in candidates ) )
                         else:
                             p = max( ( candidate.logprob for candidate in candidates ) )
-                    self.maxprob[(index, length)] = p
+                        self.maxprob[(index, length)] = p
 
         #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
         #also assign cost to previously uncovered slices
