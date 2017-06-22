@@ -68,7 +68,7 @@ def compute_vector_distances(trainingdata, testdata):
     #nearests_fn = theano.function([x, y], bestIndices, profile=False)
     #return nearests_fn(trainingdata, testdata)
 
-    squaredpwdist_fn = theano.function([x, y], [T.transpose(squaredPairwiseDistances), T.transpose(T.argsort(squaredPairwiseDistances))] , profile=False)
+    squaredpwdist_fn = theano.function([x, y], [T.transpose(squaredPairwiseDistances), T.transpose(T.argsort(squaredPairwiseDistances, axis=0))] , profile=False)
 
 
     return squaredpwdist_fn(trainingdata, testdata)
@@ -122,6 +122,7 @@ def combinations(l):
                 yield [x] + y
 
 def pretokenizer(text):
+    text = text.strip(' \n\t\r')
     begin = 0
     rawtokens = []
     for i, c in enumerate(text.strip()):
@@ -326,7 +327,7 @@ class Corrector:
             for trainindex in bestindices[:1000]:
                 distance = distancematrix[i][trainindex]
                 matchingdistances.add(distance)
-                if len(matchingdistances) > self.args.neighbours:
+                if len(matchingdistances) > self.args.neighbours or distance > self.args.maxvd:
                     break
                 h = anahash_fromvector(self.trainingdata[trainindex])
                 matchinganagramhashes[h].add((testword, distance))
