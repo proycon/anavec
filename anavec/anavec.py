@@ -589,7 +589,7 @@ class Corrector:
                 for n in range(2,self.args.ngrams+1):
                     for sequence in sequences:
                         for ngram in ngrams(sequence, n):
-                            text = "".join( w for w, _,_ in ngram )
+                            text = " ".join( w for w, _,_ in ngram )
                             index = min( i for _,_,i in ngram)
                             state = max( s for _,s,_ in ngram) #will be CORRECTABLE or INCORRECT ( CORRECT can't be part of a sequence)
                             testpatterns.append(( text, state, index, n ))
@@ -723,7 +723,6 @@ class StackDecoder:
                         self.maxprob[(index, length)] = -99
 
         #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
-        #also assign cost to previously uncovered slices
         for index in range(0, self.length):
             for length in range(2, self.corrector.args.ngrams+1):
                 if index+length>self.length:
@@ -742,9 +741,10 @@ class StackDecoder:
                             except KeyError:
                                 partitionsum = None
                                 break
-                    if partitionsum is not None and partitionsum > p:
+                    if partitionsum is not None and p is not None and partitionsum > p:
                         p = partitionsum #assigns the minimal partitionsum
-                self.maxprob[(index, length)] = partitionsum
+                if p is not None:
+                    self.maxprob[(index, length)] = p
 
 
 
