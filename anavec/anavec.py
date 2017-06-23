@@ -418,7 +418,6 @@ class Corrector:
         begin = 0
         for i, state in enumerate(mask):
             if state & InputTokenState.EOL or i == len(mask) - 1:
-                assert False
                 begintime = time.time()
                 decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize, offset=begin, length=(i-begin)+1)
                 topresults = []
