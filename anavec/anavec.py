@@ -418,6 +418,7 @@ class Corrector:
         begin = 0
         for i, state in enumerate(mask):
             if state & InputTokenState.EOL or i == len(mask) - 1:
+                assert False
                 begintime = time.time()
                 decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize, offset=begin, length=(i-begin)+1)
                 topresults = []
@@ -718,6 +719,9 @@ class StackDecoder:
                         else:
                             p = max( ( candidate.logprob for candidate in candidates ) )
                         self.maxprob[(index, length)] = p
+                    elif length == 1:
+                        #word has no translation candidates, assign a low probability
+                        self.maxprob[(index, length)] = -99
 
         #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
         #also assign cost to previously uncovered slices
@@ -949,7 +953,7 @@ def main():
 
     if args.json:
         print("[")
-    for results in corrector.correct(testwords):
+    for results in corrector.correct(testwords, mask):
         if args.json:
             corrector.output_json(results)
             print(",")
