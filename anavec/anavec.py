@@ -367,7 +367,7 @@ class Corrector:
                     AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned': False})
                 )
             else:
-                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
+                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning (" + str(len(candidates[testword])) + ")", list(sorted(candidates[testword], key=lambda x: x[1])) ,file=sys.stderr)
                 #we have multiple candidates per testword; we are going to use four sources to rank:
                 #   1) the vector distance
                 #   2) the levensthein distance
@@ -376,7 +376,7 @@ class Corrector:
                 candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), self.getfrequencytuple(candidate)) for candidate, vdistance in candidates[testword] ]
                 #prune candidates below thresholds:
                 candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= self.args.maxld and freqtuple[0] >= self.args.minfreq ]
-                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning (" + str(len(candidates_extended))+ ")", candidates_extended,file=sys.stderr)
+                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning (" + str(len(candidates_extended))+ ")", list(sorted(candidates_extended, key=lambda x: (x[2],x[1],x[3]))),file=sys.stderr)
                 if state & InputTokenState.INCORRECT:
                     #The word is explicitly marked incorrect, any correction candidate that is equal to the input word will be pruned
                     candidates_extended = [ (candidate, vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance,freq, inlexicon  in candidates_extended if candidate != testword ]
