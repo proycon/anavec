@@ -358,7 +358,7 @@ class Corrector:
                 freqtuple = self.getfrequencytuple(testword)
                 assert length == 1
                 candidatetree[index][length].append(
-                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm)})
+                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned': False})
                 )
             else:
                 if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning: " + str(len(candidates[testword])),file=sys.stderr)
@@ -394,8 +394,9 @@ class Corrector:
                     confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
                         logprob = math.log10(score / confidencesum) #normalize to get a likelihood and log to get logprob
+                        correct = i == 0 and candidate == testword and score >= self.args.correctscore
                         candidatetree[index][length].append(
-                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': i == 0 and candidate == testword and score >= self.args.correctscore, 'lmselect': False})
+                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False})
                         )
         timer(begintime)
 
@@ -407,9 +408,25 @@ class Corrector:
                 freqtuple = self.getfrequencytuple(testword)
                 if len(candidatetree[index][1]) == 0:
                     candidatetree[index][1].append(
-                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm)})
+                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned':False})
                     )
 
+        #Prune candidates that conflict (overlap) with correct candidates
+        for index in sorted(candidatetree):
+            for length in sorted(candidatetree[index]):
+                if length > 1 and not candidatetree[index][length][0].correct:
+                    overlapswithcorrect = False
+                    for j in range(index, index+length):
+                        for l in range(1,length):
+                            try:
+                                if candidatetree[j][l][0].correct:
+                                    overlapswithcorrect=True
+                                    break
+                            except KeyError:
+                                pass
+                    if overlapswithcorrect:
+                        for candidate in candidatetree[index][length]:
+                            candidate.pruned = True
 
         if self.args.locallm:
             #Alternative LM selection method, if this is enabled the LM in the decoder later will be disabled
@@ -653,6 +670,8 @@ class StackDecoder:
                 count = 0
                 while stack.data:
                     hypothesis = stack.pop()
+                    if self.corrector.args.debug:
+                        print("[DEBUG] EXPANDING Hypothesis " + repr(hypothesis), file=sys.stderr)
                     for newhypothesis in hypothesis.expand():
                         count += 1
                         coverage = newhypothesis.coverage()
@@ -780,11 +799,12 @@ class CorrectionHypothesis:
                 for length, candidates in sorted(self.decoder.candidatetree[self.decoder.offset+nextindex].items(), key=lambda x: x[0]):
                     nofurtherexpansion = False
                     for candidate in candidates:
-                        found = True
-                        yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
-                        if candidate.correct:
-                            nofurtherexpansion = True
-                            break #do not consider further alternatives, neither for this element nor for any multispan elements, if candidate is resolved as correct
+                        if not candidate.pruned:
+                            found = True
+                            yield CorrectionHypothesis(candidate, nextindex, length, self.decoder, self)
+                            if candidate.correct:
+                                nofurtherexpansion = True
+                                break #do not consider further alternatives, neither for this element nor for any multispan elements, if candidate is resolved as correct
                     if nofurtherexpansion:
                         nofurtherexpansion  = False
                         break
