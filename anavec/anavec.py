@@ -552,6 +552,8 @@ class Corrector:
                         print("\t" + candidate['text'] + "\t[score=" + str(candidate['score']) + " logprob="+str(candidate.logprob) + " vd=" + str(candidate['vdistance']) + " ld=" + str(candidate['ldistance']) + " freq=" + str(candidate['freq']) + " inlexicon=" + str(int(candidate['inlexicon'])) + " error=" + str(int(candidate['error'])) + " correct=" + str(int(candidate['correct'])),end="")
                         if self.args.lm:
                             print(" lmselect=" + str(int(candidate.lmselect)), end="")
+                        if candidate.pruned:
+                            print(" *PRUNED*", end="")
                         print("]")
         print("TOP RESULTS:")
         for i, result in enumerate(results['top']):
