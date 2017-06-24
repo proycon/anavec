@@ -330,8 +330,11 @@ class Corrector:
                 matchingdistances.add(distance)
                 if len(matchingdistances) > self.args.neighbours or distance > self.args.maxvd:
                     break
+                trainlength = np.sum(self.trainingdata[trainindex])
+                if abs(testlength-trainlength) > self.args.maxld:
+                    #discard patterns that will exceed the max LD (quick heuristic approach without computing full LD)
+                    continue
                 if self.args.maxdeleteratio > 0:
-                    trainlength = np.sum(self.trainingdata[trainindex])
                     if testlength > trainlength and testlength - trainlength > round(self.args.maxdeleteratio*testlength):
                         #too many deletions, we do not consider this anagram
                         continue
