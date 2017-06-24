@@ -324,11 +324,17 @@ class Corrector:
             #distances contains the distances between testword and all training instances
             #we extract the top k **distances**:
             matchingdistances = set()
-            for trainindex in bestindices[:1000]:
+            if self.args.maxdeleteratio > 0: testlength = np.sum(testdata[i])
+            for trainindex in bestindices:
                 distance = distancematrix[i][trainindex]
                 matchingdistances.add(distance)
                 if len(matchingdistances) > self.args.neighbours or distance > self.args.maxvd:
                     break
+                if self.args.maxdeleteratio > 0:
+                    trainlength = np.sum(self.trainingdata[trainindex])
+                    if testlength - trainlength < round(self.args.maxdeleteratio*testlength):
+                        #too many deletions, we do not consider this anagram
+                        continue
                 h = anahash_fromvector(self.trainingdata[trainindex])
                 matchinganagramhashes[h].add((testword, distance))
         timer(begintime)
@@ -919,6 +925,7 @@ def setup_argparser(parser):
     parser.add_argument('-t','--minfreq', type=int,help="Minimum frequency threshold (occurrence count) in background corpus", action='store',default=1,required=False)
     parser.add_argument('-a','--alphafreq', type=int,help="Minimum alphabet frequency threshold (occurrence count); characters occuring less are not considered in the anagram vectors", action='store',default=10,required=False)
     parser.add_argument('-b','--beamsize', type=int,help="Beamsize for the decoder", action='store',default=100,required=False)
+    parser.add_argument('--maxdeleteratio', type=float,help="Do not allow a word to lose more than this fraction of its letters", action='store',default=0.34,required=False)
     parser.add_argument('--lexfreq', type=int,help="Artificial frequency (occurrence count) for items in the lexicon that are not in the background corpus", action='store',default=1,required=False)
     parser.add_argument('--ldweight', type=float,help="Levenshtein distance weight for candidating ranking", action='store',default=1,required=False)
     parser.add_argument('--vdweight', type=float,help="Vector distance weight for candidating ranking", action='store',default=1,required=False)
