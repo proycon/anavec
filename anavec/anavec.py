@@ -332,7 +332,7 @@ class Corrector:
                     break
                 if self.args.maxdeleteratio > 0:
                     trainlength = np.sum(self.trainingdata[trainindex])
-                    if testlength - trainlength < round(self.args.maxdeleteratio*testlength):
+                    if testlength > trainlength and testlength - trainlength > round(self.args.maxdeleteratio*testlength):
                         #too many deletions, we do not consider this anagram
                         continue
                 h = anahash_fromvector(self.trainingdata[trainindex])
