@@ -431,15 +431,12 @@ class Corrector:
                             words = candidate.text.split(' ')
                             if len(words) == length:
                                 for offset, word in enumerate(words):
-                                    try:
-                                        for candidate2 in candidatetree[index+offset][1]:
-                                            if not candidate2.overlaps and candidate2.text == word:
-                                                #candidate overlaps
-                                                if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once)", file=sys.stderr)
-                                                candidate2.logprob += ngramboost
-                                                candidate2.overlaps = True
-                                    except KeyError:
-                                        pass
+                                    for candidate2 in candidatetree[index+offset][1]:
+                                        if not hasattr(candidate2,'overlaps') and candidate2.text == word:
+                                            #candidate overlaps
+                                            if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once)", file=sys.stderr)
+                                            candidate2.logprob += ngramboost
+                                            candidate2.overlaps = True
 
 
         #Prune candidates that conflict (overlap) with correct candidates
