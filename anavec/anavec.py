@@ -420,6 +420,28 @@ class Corrector:
                         AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned':False})
                     )
 
+
+        #boost unigram candidates that are also found in solutions of larger ngrams
+        if self.args.ngramboost:
+            ngramboost = math.log10(self.args.ngramboost)
+            for index in sorted(candidatetree):
+                for length in candidatetree[index]:
+                    if length > 1:
+                        for candidate in candidatetree[index][length]:
+                            words = candidate.text.split(' ')
+                            if len(words) == length:
+                                for offset, word in enumerate(words):
+                                    try:
+                                        for candidate2 in candidatetree[index+offset][1]:
+                                            if not candidate2.overlaps and candidate2.text == word:
+                                                #candidate overlaps
+                                                if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once)", file=sys.stderr)
+                                                candidate2.logprob += ngramboost
+                                                candidate2.overlaps = True
+                                    except KeyError:
+                                        pass
+
+
         #Prune candidates that conflict (overlap) with correct candidates
         for index in sorted(candidatetree):
             for length in sorted(candidatetree[index]):
@@ -436,6 +458,8 @@ class Corrector:
                     if overlapswithcorrect:
                         for candidate in candidatetree[index][length]:
                             candidate.pruned = True
+
+
 
         if self.args.locallm:
             #Alternative LM selection method, if this is enabled the LM in the decoder later will be disabled
@@ -941,7 +965,8 @@ def setup_argparser(parser):
     parser.add_argument('--correctfreq', type=float,help="The frequency a word must have for it to be marked correct prior to decoding",action='store',default=200,required=False)
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
-    parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection just prior to output")
+    parser.add_argument('--ngramboost',type=float, help="Boost unigram candidates that are also predicted as part of larger ngrams, by the specified factor",action='store', default=0.25,required=False)
+    parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection (to 1.0) just prior to output")
     parser.add_argument('--locallm',action='store_true', help="Use a local LM to select a preferred candidate in each candidate list instead of the LM integrated in the decoder")
     parser.add_argument('--report',action='store_true', help="Output a full report")
     parser.add_argument('--json',action='store_true', help="Output JSON")
