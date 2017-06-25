@@ -403,7 +403,7 @@ class Corrector:
                     confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
                         logprob = math.log10(score)
-                        correct = i == 0 and candidate == testword and score >= self.args.correctscore and (inlexicon or not self.args.lexicon)
+                        correct = i == 0 and candidate == testword and score >= self.args.correctscore and (inlexicon or not self.args.lexicon) and freq > self.args.correctfreq
                         candidatetree[index][length].append(
                             AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False})
                         )
@@ -692,7 +692,8 @@ class StackDecoder:
                             print("UNABLE to insert hypothesis  with coverage ", coverage,file=sys.stderr)
                             print("Stack sizes: " + str(i)+ ": ", [ (i, len(s)) for i, s in enumerate(self.stacks) ], file=sys.stderr)
                             print("Hypothesis: ", repr(newhypothesis),file=sys.stderr)
-                            raise
+                            print("Candidates: ",file=sys.stderr)
+                            pass
 
                 print(" (" + str(count) + " hypotheses generated after decoding stack " + str(i) + ")", file=sys.stderr)
                 if self.corrector.args.debug: print("[DEBUG] Stack sizes after decoding stack " + str(i)+ ": ", [ (i, len(s)) for i, s in enumerate(self.stacks) ])
@@ -936,7 +937,8 @@ def setup_argparser(parser):
     parser.add_argument('--lexweight', type=float,help="Lexicon distance weight for candidating ranking", action='store',default=1,required=False)
     parser.add_argument('--lmweight', type=float,help="Language Model weight for Language Model selection (together with --correctionweight)", action='store',default=1,required=False)
     parser.add_argument('--correctionweight', type=float,help="Correction Model weight for Language Model selection (together with --lmweight)", action='store',default=1,required=False)
-    parser.add_argument('--correctscore', type=float,help="The score the a word must reach to be considered correct", action='store',default=0.60,required=False)
+    parser.add_argument('--correctscore', type=float,help="The score a word must reach to be marked correct prior to decoding", action='store',default=0.60,required=False)
+    parser.add_argument('--correctfreq', type=float,help="The frequency a word must have for it to be marked correct prior to decoding",action='store',default=200,required=False)
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection just prior to output")
