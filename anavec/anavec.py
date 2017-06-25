@@ -402,8 +402,8 @@ class Corrector:
                     candidates_confidencescored = candidates_confidencescored[:self.args.candidates] #prune candidates below the cut-off threshold
                     confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
-                        logprob = math.log10(score) # / confidencesum) #normalize to get a likelihood and log to get logprob
-                        correct = i == 0 and candidate == testword and score >= self.args.correctscore
+                        logprob = math.log10(score)
+                        correct = i == 0 and candidate == testword and score >= self.args.correctscore and (inlexicon or not self.args.lexicon)
                         candidatetree[index][length].append(
                             AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False})
                         )
