@@ -757,6 +757,7 @@ class StackDecoder:
         self.maxprob = {}
         for index in range(0, self.length):
             for length in range(1, self.length-index+1):
+                if length > 1 and self.decoder.corrector.args.simpledecoder: continue #skip ngrams if we opt for simple decoding
                 if length == 1 and self.mask[index] & InputTokenState.CORRECT:
                     self.maxprob[(index, length)] = 0
                 else:
@@ -775,28 +776,29 @@ class StackDecoder:
                         self.maxprob[(index, length)] = -99
 
         #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
-        for index in range(0, self.length):
-            for length in range(2, self.corrector.args.ngrams+1):
-                if index+length>self.length:
-                    continue
-                if (index, length) in self.maxprob:
-                    p = self.maxprob[(index,length)]
-                else:
-                    p = None #we have no cost for this cell yet
-                if length <= self.corrector.args.ngrams:
-                    for partition in splits[length]:
-                        partitionsum = 0
-                        for subindex, sublength in partition:
-                            subindex = index + subindex
-                            try:
-                                partitionsum += self.maxprob[(subindex, sublength)]
-                            except KeyError:
-                                partitionsum = None
-                                break
-                    if partitionsum is not None and p is not None and partitionsum > p:
-                        p = partitionsum #assigns the minimal partitionsum
-                if p is not None:
-                    self.maxprob[(index, length)] = p
+        if not self.decoder.corrector.args.simpledecoder:
+            for index in range(0, self.length):
+                for length in range(2, self.corrector.args.ngrams+1):
+                    if index+length>self.length:
+                        continue
+                    if (index, length) in self.maxprob:
+                        p = self.maxprob[(index,length)]
+                    else:
+                        p = None #we have no cost for this cell yet
+                    if length <= self.corrector.args.ngrams:
+                        for partition in splits[length]:
+                            partitionsum = 0
+                            for subindex, sublength in partition:
+                                subindex = index + subindex
+                                try:
+                                    partitionsum += self.maxprob[(subindex, sublength)]
+                                except KeyError:
+                                    partitionsum = None
+                                    break
+                        if partitionsum is not None and p is not None and partitionsum > p:
+                            p = partitionsum #assigns the minimal partitionsum
+                    if p is not None:
+                        self.maxprob[(index, length)] = p
 
 
 
@@ -830,6 +832,7 @@ class CorrectionHypothesis:
             found = False
             if nextindex in self.decoder.candidatetree:
                 for length, candidates in sorted(self.decoder.candidatetree[self.decoder.offset+nextindex].items(), key=lambda x: x[0]):
+                    if length > 1 and self.decoder.corrector.args.simpledecoder: continue #skip ngrams if we opt for simple decoding
                     nofurtherexpansion = False
                     for candidate in candidates:
                         if not candidate.pruned:
@@ -963,6 +966,7 @@ def setup_argparser(parser):
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--ngramboost',type=float, help="Boost unigram candidates that are also predicted as part of larger ngrams, by the specified factor",action='store', default=0.25,required=False)
+    parser.add_argument('-1','--simpledecode',action='store_true', help="Use only unigrams in decoding")
     parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection (to 1.0) just prior to output")
     parser.add_argument('--locallm',action='store_true', help="Use a local LM to select a preferred candidate in each candidate list instead of the LM integrated in the decoder")
     parser.add_argument('--report',action='store_true', help="Output a full report")
