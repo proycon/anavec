@@ -385,13 +385,13 @@ class Corrector:
                     candidates_extended = [ (candidate, vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance,freq, inlexicon  in candidates_extended if candidate != testword ]
                 result_candidates = []
                 if candidates_extended:
-                    freqsum = sum(( freq for _, _, _, freq, _  in candidates_extended ))
+                    maxfreq = max(( freq for _, _, _, freq, _  in candidates_extended ))
 
                     #compute a normalized confidence score including all components according to their weights:
                     candidates_confidencescored = [ ( candidate, (
                         self.args.vdweight * (1/(vdistance+1)) + \
                         self.args.ldweight * (1/(ldistance+1)) + \
-                        self.args.freqweight * (freq/freqsum) + \
+                        self.args.freqweight * (freq/maxfreq)**0.25 + \
                         (self.args.lexweight if inlexicon else 0)
                         )
                     ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
@@ -402,7 +402,7 @@ class Corrector:
                     candidates_confidencescored = candidates_confidencescored[:self.args.candidates] #prune candidates below the cut-off threshold
                     confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
                     for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
-                        logprob = math.log10(score / confidencesum) #normalize to get a likelihood and log to get logprob
+                        logprob = math.log10(score) # / confidencesum) #normalize to get a likelihood and log to get logprob
                         correct = i == 0 and candidate == testword and score >= self.args.correctscore
                         candidatetree[index][length].append(
                             AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False})
