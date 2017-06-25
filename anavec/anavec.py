@@ -367,7 +367,7 @@ class Corrector:
                 freqtuple = self.getfrequencytuple(testword)
                 assert length == 1
                 candidatetree[index][length].append(
-                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned': False})
+                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned': False, 'overlaps': False})
                 )
             else:
                 if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning (" + str(len(candidates[testword])) + ")", list(sorted(candidates[testword], key=lambda x: x[1])) ,file=sys.stderr)
@@ -405,7 +405,7 @@ class Corrector:
                         logprob = math.log10(score)
                         correct = i == 0 and candidate == testword and score >= self.args.correctscore and (inlexicon or not self.args.lexicon) and freq > self.args.correctfreq
                         candidatetree[index][length].append(
-                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False})
+                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False, 'overlaps': False})
                         )
         timer(begintime)
 
@@ -417,7 +417,7 @@ class Corrector:
                 freqtuple = self.getfrequencytuple(testword)
                 if len(candidatetree[index][1]) == 0:
                     candidatetree[index][1].append(
-                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned':False})
+                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned':False, 'overlaps': False})
                     )
 
 
@@ -432,7 +432,7 @@ class Corrector:
                             if len(words) == length:
                                 for offset, word in enumerate(words):
                                     for candidate2 in candidatetree[index+offset][1]:
-                                        if not hasattr(candidate2,'overlaps') and candidate2.text == word:
+                                        if not candidate2.overlaps and candidate2.text == word:
                                             #candidate overlaps
                                             if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once)", file=sys.stderr)
                                             candidate2.logprob += ngramboost

@@ -51,11 +51,17 @@ def main():
     for result, (testwords, mask, reference) in zip(corrector.correct(alltestwords, allmask), references):
         output = list(sorted(result['candidatetree'][2][1], key=lambda x: -1 * x.score))
         if output:
+            if reference == output[0].text:
+                match = "BEST"
+            elif reference in [c.text for c in output]:
+                match = "YES"
+            else:
+                match = "NO"
+            print(match + "\t[" + reference + "]\t" +  testwords[2] + "\t-->\t" + "\t".join([ c.text + "["+str(c.score)+"]" for c in output]))
             output = output[0].text
-            print("\t" + testwords[2] + "\t-->\t" + "\t".join([ c.text for c in sorted(result['candidatetree'][2][1], key=lambda x: -1 *x.score)]))
         else:
             output = ""
-            print("\t" + testwords[2] + "\t-->\tNO-SUGGESTIONS!")
+            print("NO\t[" + reference + "]\t" + testwords[2] + "\t-->\tNO-SUGGESTIONS! [0.0]")
         observations.append(output)
         goals.append(reference)
 
