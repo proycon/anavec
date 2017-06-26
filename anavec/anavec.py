@@ -862,7 +862,7 @@ class CorrectionHypothesis:
     def __str__(self):
         if self.candidate is None:
             return ""
-        elif self.parent is None:
+        elif self.parent is None or self.parent is self:
             return self.candidate.text
         else:
             return (str(self.parent) + " " + self.candidate.text).strip()
