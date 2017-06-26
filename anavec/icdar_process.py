@@ -50,7 +50,7 @@ def process_task1(corrector, testfiles, args):
         begin = 0
         for i, (testtoken, state) in enumerate(zip(testtokens, mask)):
             if testtoken == '.':
-                if i - begin >= 6 and i+1 < len(testtokens) and testtoken[i+1][0].isalpha() and testtoken[i+1][0] == testtoken[i+1][0].upper():
+                if i - begin >= 6 and i+1 < len(testtokens) and testtokens[i+1][0].isalpha() and testtokens[i+1][0] == testtokens[i+1][0].upper():
                     mask[i] |= InputTokenState.TOKEN
                     begin = i
 
