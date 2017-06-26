@@ -966,7 +966,7 @@ def setup_argparser(parser):
     parser.add_argument('--punctweight', type=int,help="Punctuation character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--unkweight', type=int,help="Unknown character weight for anagram vector representation", action='store',default=1,required=False)
     parser.add_argument('--ngramboost',type=float, help="Boost unigram candidates that are also predicted as part of larger ngrams, by the specified factor",action='store', default=0.25,required=False)
-    parser.add_argument('-1','--simpledecode',action='store_true', help="Use only unigrams in decoding")
+    parser.add_argument('-1','--simpledecoder',action='store_true', help="Use only unigrams in decoding")
     parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection (to 1.0) just prior to output")
     parser.add_argument('--locallm',action='store_true', help="Use a local LM to select a preferred candidate in each candidate list instead of the LM integrated in the decoder")
     parser.add_argument('--report',action='store_true', help="Output a full report")
