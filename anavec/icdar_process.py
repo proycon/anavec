@@ -65,6 +65,7 @@ def process_task1(corrector, testfiles, args):
 
                     tokenlength = candidate.hypothesis.length #in tokens
                     correction = candidate.text
+                    origtokenlength = tokenlength
                     if tokenlength > 1:
                         #we cover multiple tokens, but our tokens may be more split than in the original tokenisation
                         #find the original token length
