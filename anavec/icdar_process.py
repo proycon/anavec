@@ -55,33 +55,33 @@ def process_task1(corrector, testfiles, args):
                     begin = i
 
 
-        result = next(corrector.correct(testtokens, mask))
-        print("Top result: ", str(result['top'][0]),file=sys.stderr)
-        for candidate in result['top'][0]:
-            if candidate.error:
-                index = candidate.index
-                beginchar, endchar, punctail = positions[index]
-                assert beginchar is not None
+        for results in corrector.correct(testtokens, mask):
+            print("Top result: ", str(results['top'][0]),file=sys.stderr)
+            for candidate in results['top'][0]:
+                if candidate.error:
+                    index = candidate.index
+                    beginchar, endchar, punctail = positions[index]
+                    assert beginchar is not None
 
-                tokenlength = candidate.length #in tokens
-                correction = candidate.text
-                if tokenlength > 1:
-                    #we cover multiple tokens, but our tokens may be more split than in the original tokenisation
-                    #find the original token length
-                    origtokenlength = 0
-                    for i, (beginchar2,endchar2,punctail2) in enumerate(positions[index:]):
-                        if beginchar2 is not None:
-                            if i == tokenlength:
-                                break
-                            origtokenlength += 1
-                            punctail = punctail2
-                            endchar = endchar2
+                    tokenlength = candidate.length #in tokens
+                    correction = candidate.text
+                    if tokenlength > 1:
+                        #we cover multiple tokens, but our tokens may be more split than in the original tokenisation
+                        #find the original token length
+                        origtokenlength = 0
+                        for i, (beginchar2,endchar2,punctail2) in enumerate(positions[index:]):
+                            if beginchar2 is not None:
+                                if i == tokenlength:
+                                    break
+                                origtokenlength += 1
+                                punctail = punctail2
+                                endchar = endchar2
 
-                #re-add any punctuation
-                correction += punctail
-                original = text[beginchar:endchar]
-                print("[" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
-                icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
+                    #re-add any punctuation
+                    correction += punctail
+                    original = text[beginchar:endchar]
+                    print("[" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
+                    icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
 
         return icdar_results
 
