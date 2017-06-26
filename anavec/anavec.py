@@ -757,7 +757,7 @@ class StackDecoder:
         self.maxprob = {}
         for index in range(0, self.length):
             for length in range(1, self.length-index+1):
-                if length > 1 and self.decoder.corrector.args.simpledecoder: continue #skip ngrams if we opt for simple decoding
+                if length > 1 and self.corrector.args.simpledecoder: continue #skip ngrams if we opt for simple decoding
                 if length == 1 and self.mask[index] & InputTokenState.CORRECT:
                     self.maxprob[(index, length)] = 0
                 else:
