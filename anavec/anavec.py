@@ -776,7 +776,7 @@ class StackDecoder:
                         self.maxprob[(index, length)] = -99
 
         #now ensure the score of any slice is not smaller than the maximal sum amongst its parts
-        if not self.decoder.corrector.args.simpledecoder:
+        if not self.corrector.args.simpledecoder:
             for index in range(0, self.length):
                 for length in range(2, self.corrector.args.ngrams+1):
                     if index+length>self.length:
