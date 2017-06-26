@@ -61,7 +61,13 @@ def process_task1(corrector, testfiles, args):
                 if candidate.error:
                     index = candidate.hypothesis.index
                     beginchar, endchar, punctail = positions[index]
-                    assert beginchar is not None
+                    if beginchar is not None:
+                        print("Index: ",index,file=sys.stderr)
+                        print("Positions[index]: ",positions[index],file=sys.stderr)
+                        print("All positions: ",positions[index],file=sys.stderr)
+                        print("Partial hypothesis: ",repr(candidate.hypothesis),file=sys.stderr)
+                        raise Exception("Expected a beginchar, got None")
+
 
                     tokenlength = candidate.hypothesis.length #in tokens
                     correction = candidate.text
