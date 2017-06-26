@@ -855,6 +855,7 @@ class CorrectionHypothesis:
         else:
             for candidate in iter(self.parent):
                 yield candidate
+            yield self.candidate
 
     def __repr__(self):
         return "<"  + str(self) + " [logprob=" + str(self.logprob) + "; coverage=" + repr(self.coverage()) + "; correctionprob=" + str(self.correctionprob) + "; lmprob=" + str(self.lmprob) + "]>"
