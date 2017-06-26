@@ -849,7 +849,7 @@ class CorrectionHypothesis:
                 nextindex += 1
 
     def __iter__(self):
-        if self.parent is None:
+        if self.parent is None or self.parent is self:
             if self.candidate is not None:
                 yield self.candidate
         else:

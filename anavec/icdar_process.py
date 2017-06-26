@@ -56,6 +56,7 @@ def process_task1(corrector, testfiles, args):
 
 
         result = next(corrector.correct(testtokens, mask))
+        print("Top result: ", str(result['top'][0]),file=sys.stderr)
         for candidate in result['top'][0]:
             if candidate.error:
                 index = candidate.index
