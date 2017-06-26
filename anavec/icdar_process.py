@@ -32,6 +32,14 @@ def readpositiondata(positionfile):
     return positiondata
 
 
+def setbreakpoints(testtokens, mask, eager=False):
+    """input is all on one line, this will overwhelm the decoder, split into 'lines' at points where punctuation likely indicates a sentence ending"""
+    begin = 0
+    for i, (testtoken, state) in enumerate(zip(testtokens, mask)):
+        if testtoken == '.' or (eager and testtoken[-1] == '.' and i+1 < len(testtokens) and mask[i+1] & InputTokenState.CORRECT):
+            if i - begin >= 6 and i+1 < len(testtokens) and testtokens[i+1][0].isalpha() and testtokens[i+1][0] == testtokens[i+1][0].upper():
+                mask[i] |= InputTokenState.EOL
+                begin = i
 
 def process_task1(corrector, testfiles, args):
     icdar_results = {} #results as per challenge specification
@@ -47,12 +55,7 @@ def process_task1(corrector, testfiles, args):
         testtokens, mask, positions = readinput(lines, False)
 
         #input is all on one line, this will overwhelm the decoder, split into 'lines' at points where punctuation likely indicates a sentence ending
-        begin = 0
-        for i, (testtoken, state) in enumerate(zip(testtokens, mask)):
-            if testtoken == '.':
-                if i - begin >= 6 and i+1 < len(testtokens) and testtokens[i+1][0].isalpha() and testtokens[i+1][0] == testtokens[i+1][0].upper():
-                    mask[i] |= InputTokenState.EOL
-                    begin = i
+        setbreakpoints(testtokens, mask)
 
 
         for results in corrector.correct(testtokens, mask):
@@ -136,10 +139,12 @@ def process_task2(corrector, testfiles, positionfile, args):
         if found != len(positions):
             raise Exception("One or more positions were not found in the text!")
 
+        #input is all on one line, this will overwhelm the decoder, split into 'lines' at points where punctuation likely indicates a sentence ending
+        setbreakpoints(testwords, mask, True)
 
         print("Running anavec on input: ", list(zip(testwords,mask, positions_extended)), file=sys.stderr)
 
-        for results in corrector.correct(testwords, mask): #results as presented by anavec (should only do one iteration as each input is on one line)
+        for results in corrector.correct(testwords, mask): #results as presented by anavec
 
             assert len(results['candidatetree']) == len(testwords)
             assert len(positions_extended) == len(testwords)
