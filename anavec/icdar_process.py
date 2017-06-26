@@ -55,9 +55,6 @@ def process_task1(corrector, testfiles, args):
                     begin = i
 
 
-        readinput(testtokens, mask, positions)
-
-
         result = next(corrector.correct(testtokens, mask))
         for candidate in result['top'][0]:
             if candidate.error:
