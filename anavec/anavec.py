@@ -435,7 +435,7 @@ class Corrector:
                                         if not candidate2.overlaps and candidate2.text == word:
                                             #candidate overlaps
                                             if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once)", file=sys.stderr)
-                                            candidate2.logprob += ngramboost
+                                            candidate2.logprob -= ngramboost
                                             candidate2.overlaps = True
 
 
