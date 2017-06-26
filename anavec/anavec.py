@@ -423,7 +423,6 @@ class Corrector:
 
         #boost unigram candidates that are also found in solutions of larger ngrams
         if self.args.ngramboost:
-            ngramboost = math.log10(self.args.ngramboost)
             for index in sorted(candidatetree):
                 for length in candidatetree[index]:
                     if length > 1:
@@ -434,8 +433,8 @@ class Corrector:
                                     for candidate2 in candidatetree[index+offset][1]:
                                         if not candidate2.overlaps and candidate2.text == word:
                                             #candidate overlaps
-                                            if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once)", file=sys.stderr)
-                                            candidate2.logprob -= ngramboost
+                                            if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once): ", file=sys.stderr)
+                                            candidate2.logprob *= self.args.ngramboost
                                             candidate2.overlaps = True
 
 
