@@ -723,7 +723,7 @@ class StackDecoder:
                 if i == 0:
                     for candidate in hyp:
                         candidate.lmselect = True
-                        if self.corrector.ars.lmwin:
+                        if self.corrector.args.lmwin:
                             candidate.score = 1.0
                             candidate.logprob = 0
                 yield hyp
