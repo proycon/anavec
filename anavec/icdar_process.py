@@ -46,6 +46,18 @@ def process_task1(corrector, testfiles, args):
         assert len(lines) == 1
         testtokens, mask, positions = readinput(lines, False)
 
+        #input is all on one line, this will overwhelm the decoder, split into 'lines' at points where punctuation likely indicates a sentence ending
+        begin = 0
+        for i, (testtoken, state) in enumerate(zip(testtokens, mask)):
+            if testtoken == '.':
+                if begin - i >= 6 and i+1 < len(testokens) and testtoken[i+1][0].isalpha() and testtoken[i+1][0] == testtoken[i+1][0].upper():
+                    mask[i] |= InputTokenState.TOKEN
+                    begin = i
+
+
+        readinput(testtokens, mask, positions)
+
+
         result = next(corrector.correct(testtokens, mask))
         for candidate in result['top'][0]:
             if candidate.error:

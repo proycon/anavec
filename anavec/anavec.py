@@ -984,18 +984,21 @@ def readinput(lines, istokenized):
             tokenizedline = pretokenizer(line)
             for token, begin, end, punctail in tokenizedline:
                 testwords.append( token )
-                mask.append( InputTokenState.CORRECTABLE )
+                if any( c.isalpha() for c in token):
+                    mask.append( InputTokenState.CORRECTABLE )
+                else:
+                    mask.append( InputTokenState.CORRECT )
                 positions.append( (begin, end, punctail) )
                 if punctail:
-                    #trailing punctuation becomes a separate token
+                    #trailing punctuation becomes a separate (incorrectable) token
                     testwords.append( punctail )
-                    mask.append( InputTokenState.CORRECTABLE | InputTokenState.PUNCTAIL )
+                    mask.append( InputTokenState.CORRECT | InputTokenState.PUNCTAIL )
                     positions.append( (None,None,None) )
             mask[-1] |= InputTokenState.EOL
         else:
             tokens  = [ w.strip() for w in line.split(' ') if w.strip() ]
-            testwords += rawtokens
-            mask += [ InputTokenState.CORRECTABLE ] * len(words)
+            testwords += tokens
+            mask += [ InputTokenState.CORRECTABLE ] * len(tokens)
             mask[-1] |= InputTokenState.EOL
     return testwords, mask, positions
 
