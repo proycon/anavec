@@ -851,10 +851,12 @@ class CorrectionHypothesis:
     def __iter__(self):
         if self.parent is None or self.parent is self:
             if self.candidate is not None:
+                self.candidate.hypothesis = self
                 yield self.candidate
         else:
             for candidate in iter(self.parent):
                 yield candidate
+            self.candidate.hypothesis = self
             yield self.candidate
 
     def __repr__(self):

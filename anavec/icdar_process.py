@@ -59,11 +59,11 @@ def process_task1(corrector, testfiles, args):
             print("Top result: ", str(results['top'][0]),file=sys.stderr)
             for candidate in results['top'][0]:
                 if candidate.error:
-                    index = candidate.index
+                    index = candidate.hypothesis.index
                     beginchar, endchar, punctail = positions[index]
                     assert beginchar is not None
 
-                    tokenlength = candidate.length #in tokens
+                    tokenlength = candidate.hypothesis.length #in tokens
                     correction = candidate.text
                     if tokenlength > 1:
                         #we cover multiple tokens, but our tokens may be more split than in the original tokenisation
