@@ -66,7 +66,12 @@ def process(corrector, testfiles, args):
 
         if args.positionfile:
             if testfile not in positiondata:
-                raise Exception("Testfile " + testfile + " is not found in the position data!")
+                print("WARNING: Testfile " + testfile + " is not found in the position data! Skipping!", file=sys.stderr)
+                continue
+            elif not positiondata[testfile]:
+                #found but empty (happens it seems, just move on to the next testfile
+                print("WARNING: Testfile " + testfile + " exists but has no positions the position data! Skipping!", file=sys.stderr)
+                continue
             refpositions = { int(positiontuple.split(':')[0]): int(positiontuple.split(':')[1]) for positiontuple in positiondata[testfile] }
         else:
             refpositions = {}
