@@ -159,6 +159,7 @@ def process(corrector, testfiles, args):
             testtokens = testtokens_merged
             mask = mask_merged
         positions = positions_merged
+        foundpositions = {}
 
         for results in corrector.correct(testtokens, mask):
             print("Corrector best output: ", str(results['top'][0]),file=sys.stderr)
@@ -189,12 +190,18 @@ def process(corrector, testfiles, args):
                         if beginchar not in refpositions or refpositions[beginchar] != origtokenlength:
                             #task 2: not a reference token, ignore
                             continue
+                        else:
+                            foundpositions[beginchar] = True
 
                     #re-add any trailing punctuation
                     correction += punctail
                     original = text[beginchar:endchar]
                     print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
                     icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
+
+        for beginchar in sorted(refpositions):
+            if beginchar not in foundpositions:
+                print("WARNING: Position @" + str(beginchar) + ":" + str(refpositions[beginchar]) + " was not corrected in " + testfile,file=sys.stderr)
 
 
     return icdar_results
