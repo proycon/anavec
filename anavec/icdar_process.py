@@ -205,13 +205,14 @@ def process(corrector, testfiles, args):
                     if args.positionfile:
                         if beginchar not in refpositions:
                             continue
+                        foundpositions[beginchar] = True
 
                     if 1 in results.candidatetree[index]:
                         candidates = list(sorted(results.candidatetree[index][1], key=lambda x: (x.lmselect * -1, x.logprob * -1)))[:args.options]
                         if candidates:
                             #scoresum = sum( (candidate.score for candidate in candidates ) )
                             original = text[beginchar:endchar]
-                            print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + candidates + " [punctail=" + punctail+"]", file=sys.stderr)
+                            print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + "; ".join([ candidate.text + " (" + str(10**candidate.logprob) + ") " for candidate in candidates]) + " [punctail=" + punctail+"]", file=sys.stderr)
                             icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { candidate.text + punctail: 10**candidate.logprob for candidate in candidates }
 
 
