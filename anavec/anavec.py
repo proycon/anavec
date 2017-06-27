@@ -863,12 +863,13 @@ class CorrectionHypothesis:
         return "<"  + str(self) + " [logprob=" + str(self.logprob) + "; coverage=" + repr(self.coverage()) + "; correctionprob=" + str(self.correctionprob) + "; lmprob=" + str(self.lmprob) + "]>"
 
     def __str__(self):
-        if self.candidate is None:
-            return ""
-        elif self.parent is None or self.parent is self:
-            return self.candidate.text
-        else:
-            return (str(self.parent) + " " + self.candidate.text).strip()
+        hyp = self
+        s = ""
+        while hyp is not None and hyp.candidate is not None:
+            if s: s += " "
+            s += hyp.candidate.text
+            hyp = hyp.parent
+        return s
 
     def __lt__(self, other):
         return self.logprob < other.logprob
