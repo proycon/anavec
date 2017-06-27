@@ -165,9 +165,10 @@ def process(corrector, testfiles, args):
         assert len(mask) == len(positions)
 
         for results in corrector.correct(testtokens, mask):
-            print("Corrector best output: ", str(results['top'][0]),file=sys.stderr)
-            for candidate in results['top'][0]:
-                index = candidate.hypothesis.index
+            print("Corrector input: ", " ".join(results.testwords),file=sys.stderr)
+            print("Corrector best output: ", str(results.top[0]),file=sys.stderr)
+            for candidate in results.top[0]:
+                index = results.offset + candidate.hypothesis.index
                 beginchar, origtokenlength, endchar, punctail = positions[index]
                 if beginchar is None:
                     #ignore trailing punctuation

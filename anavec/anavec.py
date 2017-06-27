@@ -470,7 +470,7 @@ class Corrector:
                 for hyp in decoder.decode(self.args.topn):
                     topresults.append(hyp)
                 timer(begintime)
-                yield {'offset': begin,'top':topresults, 'candidatetree': { k-begin:v for k, v in candidatetree.items() if k >=begin and k<=i}, 'testtokens': decoder.testwords, 'mask': decoder.mask  } #contains the top n best results
+                yield AttributeDict({'offset': begin,'top':topresults, 'candidatetree': { k-begin:v for k, v in candidatetree.items() if k >=begin and k<=i}, 'testtokens': decoder.testwords, 'mask': decoder.mask  }) #contains the top n best results
                 begin = i + 1
 
 
