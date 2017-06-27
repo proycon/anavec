@@ -110,12 +110,12 @@ def process(corrector, testfiles, args):
                                     token += testtokens[i+offset]
                                 else:
                                     token += " " + testtokens[i+offset]
-                                    origoffset += 1
                                     if origoffset == mergelength:
-                                        endchar = endchar2
                                         punctail = punctail2
+                                        endchar = endchar2
                                     else:
                                         token += punctail2
+                                    origoffset += 1
                                 offset += 1
                             print(token + "]",end="",file=sys.stderr)
 
@@ -123,6 +123,7 @@ def process(corrector, testfiles, args):
                         state = InputTokenState.CORRECTABLE
                         mask_merged.append(state)
                         positions_merged.append( (beginchar, refpositions[beginchar], endchar, punctail) )
+                        print("\t[MERGE SPANS CHARS " + str(beginchar)+" TO " + str(endchar) ,end="",file=sys.stderr)
                 else:
                     print("       input token #" + str(i) + "       " + testfile + "@" + str(beginchar) + ":1 " + text[beginchar:endchar] + " -> " + token,end="",file=sys.stderr)
                     if args.positionfile:
@@ -160,6 +161,8 @@ def process(corrector, testfiles, args):
             mask = mask_merged
         positions = positions_merged
         foundpositions = {}
+        assert len(testtokens) == len(mask)
+        assert len(mask) == len(positions)
 
         for results in corrector.correct(testtokens, mask):
             print("Corrector best output: ", str(results['top'][0]),file=sys.stderr)
@@ -173,18 +176,6 @@ def process(corrector, testfiles, args):
                 if candidate.error or (args.positionfile and beginchar in refpositions):
                     tokenlength = candidate.hypothesis.length #in tokens
                     correction = candidate.text
-                    #origtokenlength = tokenlength
-                    #if tokenlength > 1:
-                    #    #we cover multiple tokens, but our tokens may be more split than in the original tokenisation
-                    #    #find the original token length
-                    #    origtokenlength = 0
-                    #    for i, beginchar2,tokenlength2,endchar2,punctail2 in enumerate(positions[index:]):
-                    #        if beginchar2 is not None:
-                    #            if i == tokenlength:
-                    #                break
-                    #            origtokenlength += tokenlength2
-                    #            punctail = punctail2
-                    #            endchar = endchar2
 
                     if args.positionfile:
                         if beginchar not in refpositions or refpositions[beginchar] != origtokenlength:
