@@ -169,7 +169,7 @@ def process(corrector, testfiles, args):
             print("Corrector best output: ", str(results.top[0]),file=sys.stderr)
 
             if args.options == 0:
-                print("(Primary source is decoder output)")
+                print("(Primary source is decoder output)",file=sys.stderr)
                 for candidate in results.top[0]:
                     index = results.offset + candidate.hypothesis.index
                     beginchar, origtokenlength, endchar, punctail = positions[index]
@@ -194,7 +194,7 @@ def process(corrector, testfiles, args):
                         print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
                         icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
             else:
-                print("(Primary source is candidate tree)")
+                print("(Primary source is candidate tree)",file=sys.stderr)
                 for index in sorted(results.candidatetree):
                     globalindex = results.offset + index
                     beginchar, origtokenlength, endchar, punctail = positions[globalindex]
