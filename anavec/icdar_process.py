@@ -167,29 +167,53 @@ def process(corrector, testfiles, args):
         for results in corrector.correct(testtokens, mask):
             print("Corrector input: ", " ".join(results.testtokens),file=sys.stderr)
             print("Corrector best output: ", str(results.top[0]),file=sys.stderr)
-            for candidate in results.top[0]:
-                index = results.offset + candidate.hypothesis.index
-                beginchar, origtokenlength, endchar, punctail = positions[index]
-                if beginchar is None:
-                    #ignore trailing punctuation
-                    continue
 
-                if candidate.error or (args.positionfile and beginchar in refpositions):
-                    tokenlength = candidate.hypothesis.length #in tokens
-                    correction = candidate.text
+            if args.options == 0:
+                print("(Primary source is decoder output)")
+                for candidate in results.top[0]:
+                    index = results.offset + candidate.hypothesis.index
+                    beginchar, origtokenlength, endchar, punctail = positions[index]
+                    if beginchar is None:
+                        #ignore trailing punctuation
+                        continue
+
+                    if candidate.error or (args.positionfile and beginchar in refpositions):
+                        tokenlength = candidate.hypothesis.length #in tokens
+                        correction = candidate.text
+
+                        if args.positionfile:
+                            if beginchar not in refpositions or refpositions[beginchar] != origtokenlength:
+                                #task 2: not a reference token, ignore
+                                continue
+                            else:
+                                foundpositions[beginchar] = True
+
+                        #re-add any trailing punctuation
+                        correction += punctail
+                        original = text[beginchar:endchar]
+                        print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
+                        icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
+            else:
+                print("(Primary source is candidate tree)")
+                for index in sorted(results.candidatetree):
+                    globalindex = results.offset + index
+                    beginchar, origtokenlength, endchar, punctail = positions[globalindex]
+                    if beginchar is None:
+                        #ignore trailing punctuation
+                        continue
 
                     if args.positionfile:
-                        if beginchar not in refpositions or refpositions[beginchar] != origtokenlength:
-                            #task 2: not a reference token, ignore
+                        if beginchar not in refpositions:
                             continue
-                        else:
-                            foundpositions[beginchar] = True
 
-                    #re-add any trailing punctuation
-                    correction += punctail
-                    original = text[beginchar:endchar]
-                    print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + correction, file=sys.stderr)
-                    icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { correction: candidate.score }
+                    if 1 in results.candidatetree[index]:
+                        candidates = list(sorted(results.candidatetree[index][1], key=lambda x: (x.lmselect * -1, x.logprob * -1)))[:args.options]
+                        if candidates:
+                            #scoresum = sum( (candidate.score for candidate in candidates ) )
+                            print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + candidates, file=sys.stderr)
+                            icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { candidate.text: 10**candidate.logprob for candidate in candidates }
+
+
 
         for beginchar in sorted(refpositions):
             if beginchar not in foundpositions:
@@ -204,10 +228,11 @@ def main():
     parser = argparse.ArgumentParser(description="ICDAR 2017 Post-OCR Correction Processing Script for Task 2 with Anavec", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--input', type=str, help="Input file or directory (*.txt files)", action='store',required=True)
     parser.add_argument('--positionfile', type=str, help="Input file with position information (erroneous_tokens_pos.json), required for task 2", action='store',required=False)
-    parser.add_argument('--options', type=int, help="Maximum number of options to output", action='store',default=5)
+    parser.add_argument('--options', type=int, help="Maximum number of options to output, if set to 0 (default), the best option according to the decoder will outputted. For values higher than 0, the candidate tree will be explicitly consulted instead, which limits the use of ngrams", action='store',default=0)
     parser.add_argument('--task', type=int, help="Task", action='store',required=True)
     setup_argparser(parser) #for anavec
     args = parser.parse_args()
+    args.lmwin = True
 
     if os.path.isdir(args.input):
         testfiles = []
