@@ -890,7 +890,11 @@ class CorrectionHypothesis:
 
         #cost of the hypothesis thus far
         if self.decoder.corrector.lm and not self.decoder.corrector.args.locallm:
-            self.lmprob = self.decoder.corrector.lm.score(str(self)) #base 10 logprob
+            try:
+                self.lmprob = self.decoder.corrector.lm.score(str(self)) #base 10 logprob
+            except RuntimeError:
+                print("WARNING: INFINITE recursion for hypothesis serialisation! Skipping...",file=sys.stderr)
+                return -9999
             self.prob = (self.decoder.corrector.args.correctionweight * self.correctionprob) + (self.decoder.corrector.args.lmweight * self.lmprob)
         else:
             self.lmprob = 0
