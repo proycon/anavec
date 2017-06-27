@@ -996,7 +996,7 @@ def readinput(lines, istokenized):
                     #trailing punctuation becomes a separate (incorrectable) token
                     testwords.append( punctail )
                     mask.append( InputTokenState.CORRECT | InputTokenState.PUNCTAIL )
-                    positions.append( (None,None,None) )
+                    positions.append( (None,None,punctail) )
             mask[-1] |= InputTokenState.EOL
         else:
             tokens  = [ w.strip() for w in line.split(' ') if w.strip() ]

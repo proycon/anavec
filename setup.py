@@ -19,7 +19,7 @@ def read(fname):
 
 setup(
     name = "Anavec",
-    version = "0.2.1",
+    version = "0.2.2",
     author = "Maarten van Gompel",
     author_email = "proycon@anaproy.nl",
     description = ("Spelling correction and normalisation using anagram vectors"),
