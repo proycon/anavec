@@ -210,8 +210,9 @@ def process(corrector, testfiles, args):
                         candidates = list(sorted(results.candidatetree[index][1], key=lambda x: (x.lmselect * -1, x.logprob * -1)))[:args.options]
                         if candidates:
                             #scoresum = sum( (candidate.score for candidate in candidates ) )
-                            print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + candidates, file=sys.stderr)
-                            icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { candidate.text: 10**candidate.logprob for candidate in candidates }
+                            original = text[beginchar:endchar]
+                            print(" Correction [" + testfile + "@" + str(beginchar) + ":" + str(origtokenlength) + "] " + original + " -> " + candidates + " [punctail=" + punctail+"]", file=sys.stderr)
+                            icdar_results[testfile][str(beginchar)+":"+str(origtokenlength)] = { candidate.text + punctail: 10**candidate.logprob for candidate in candidates }
 
 
 
