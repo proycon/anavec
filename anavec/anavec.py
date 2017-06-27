@@ -449,7 +449,7 @@ class Corrector:
                                 if candidatetree[j][l][0].correct:
                                     overlapswithcorrect=True
                                     break
-                            except KeyError:
+                            except (KeyError, IndexError):
                                 pass
                     if overlapswithcorrect:
                         for candidate in candidatetree[index][length]:
@@ -762,7 +762,7 @@ class StackDecoder:
                 else:
                     try:
                         candidates = self.candidatetree[self.offset+index][length]
-                    except KeyError:
+                    except (KeyError, IndexError):
                         candidates = None
                     if candidates:
                         if self.corrector.lm and not self.corrector.args.locallm:
