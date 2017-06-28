@@ -1000,7 +1000,7 @@ def setup_argparser(parser):
     parser.add_argument('-1','--simpledecoder',action='store_true', help="Use only unigrams in decoding")
     parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection (to 1.0) just prior to output")
     parser.add_argument('--locallm',action='store_true', help="Use a local LM to select a preferred candidate in each candidate list instead of the LM integrated in the decoder")
-    parser.add_argument('--blocksize',type=int, action='store', help="Block size: determines the amount of test types to process in one go (dimensions of the anavec test matrix), setting this helps reduce memory at the cost of speed (0 = unlimited)",default=1000)
+    parser.add_argument('--blocksize',type=int, action='store', help="Block size: determines the amount of test tokens to process in one go (dimensions of the anavec test matrix), setting this helps reduce memory at the cost of speed (0 = unlimited)",default=1000)
     parser.add_argument('--report',action='store_true', help="Output a full report")
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('--tok',action='store_true', help="Input is already tokenized")
@@ -1012,13 +1012,13 @@ def readinput(lines, istokenized, blocksize=0):
     testwords = []
     mask = []
     positions = []
-    wordtypes = set()
+    currentblocksize = 0
+    blockbegin = 0
     for line in lines:
         if not istokenized:
             tokenizedline = pretokenizer(line)
             for token, begin, end, punctail in tokenizedline:
                 testwords.append( token )
-                if blocksize > 0: wordtypes.add(token)
                 if any( c.isalpha() for c in token):
                     mask.append( InputTokenState.CORRECTABLE )
                 else:
@@ -1029,19 +1029,15 @@ def readinput(lines, istokenized, blocksize=0):
                     testwords.append( punctail )
                     mask.append( InputTokenState.CORRECT | InputTokenState.PUNCTAIL )
                     positions.append( (None,None,punctail) )
-                    if blocksize > 0: wordtypes.add(punctail)
         else:
             tokens  = [ w.strip() for w in line.split(' ') if w.strip() ]
-            if blocksize > 0:
-                for token in tokens:
-                    wordtypes.add(token)
             testwords += tokens
             mask += [ InputTokenState.CORRECTABLE ] * len(tokens)
         mask[-1] |= InputTokenState.EOL
         if blocksize > 0:
-            if len(wordtypes) >= blocksize:
+            if len(testwords) - blockbegin >= blocksize:
                 mask[-1] |= InputTokenState.EOB
-                wordtypes = set()
+                blockbegin = len(testwords)
     return testwords, mask, positions
 
 def main():
