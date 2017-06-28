@@ -59,7 +59,7 @@ def process(corrector, testfiles, args):
         if len(lines) != 1:
             raise Exception("Input file " + testfile + " contains more lines! Invalid according to specification!")
 
-        testtokens, mask, positions = readinput(lines, False)
+        testtokens, mask, positions = readinput(lines, False, args.blocksize)
 
         #input is all on one line, this will overwhelm the decoder, split into 'lines' at points where punctuation likely indicates a sentence ending
         setbreakpoints(testtokens, mask)
@@ -154,6 +154,8 @@ def process(corrector, testfiles, args):
                 print(file=sys.stderr)
             if state & InputTokenState.EOL:
                 print("  Tokenisation --eol--",file=sys.stderr)
+            if state & InputTokenState.EOB:
+                print("  Tokenisation --end of block--",file=sys.stderr)
 
         for beginchar in sorted(refpositions):
             if beginchar not in foundpositions:

@@ -311,6 +311,7 @@ class Corrector:
         if block is None:
             #we are not in a block yet, divide the input into sizeable blocks and call ourselves for each:
             for block_index, (block_testtokens, block_mask, block_offset) in enumerate(self.getblocks(testtokens, mask)):
+                print("Processing block #" + str(block_index) + ", offset " + str(block_offset)  + ", length " + str(len(block_testtokens)), file=sys.stderr)
                 for result in self.correct(block_testtokens, block_mask, block_index, block_offset):
                     yield result
         else:
