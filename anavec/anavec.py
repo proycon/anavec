@@ -997,7 +997,7 @@ def setup_argparser(parser):
     parser.add_argument('-1','--simpledecoder',action='store_true', help="Use only unigrams in decoding")
     parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection (to 1.0) just prior to output")
     parser.add_argument('--locallm',action='store_true', help="Use a local LM to select a preferred candidate in each candidate list instead of the LM integrated in the decoder")
-    parser.add_argument('--blocksize',type=int, action='store', help="Block size: determines the amount of test types to process in one go (dimensions of the anavec test matrix), setting this helps reduce memory at the cost of speed (0 = unlimited)",default=0)
+    parser.add_argument('--blocksize',type=int, action='store', help="Block size: determines the amount of test types to process in one go (dimensions of the anavec test matrix), setting this helps reduce memory at the cost of speed (0 = unlimited)",default=1000)
     parser.add_argument('--report',action='store_true', help="Output a full report")
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('--tok',action='store_true', help="Input is already tokenized")
