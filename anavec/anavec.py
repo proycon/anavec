@@ -289,7 +289,7 @@ class Corrector:
         begin = 0
         for i, state in enumerate(mask):
             if state & InputTokenState.EOB or i == len(mask) - 1:
-                yield testtokens[begin:i], mask[begin:i], begin
+                yield testtokens[begin:i+1], mask[begin:i+1], begin
                 begin = i+1
 
 
