@@ -25,9 +25,16 @@ parametrised by a weight, determining the share it takes in the whole score comp
 
 This is all context insensitive, but a Language Model can be enabled for context sensitivity. The Language Model will
 score sequences of correction candidates in context. A compound score is computed for each possible sequence of
-correction candidates, taking into account both the LM score and the score from the correction model. The winning
-sequence gets selected as the Language Model-informed choice. The weight of the Language Model versus Correction Model
-in this computation is again parametrised.
+correction candidates, taking into account both the LM score and the score from the correction model.  The weight of the
+Language Model versus Correction Model in this computation is again parametrised.
+
+A beam search decoding algorithm subsequently seeks through a large number of correction hypotheses for a given input
+sequence, looking for the one that maximises the aforementioned compound score (or returns an n-best list). This decoder
+is a stack based decoder as is also common in Machine Translation, meaning that decoding proceeds in a number of stacks,
+where each stack aggregates correction hypotheses that cover the same parts of the input sequence. The final stack will
+cover the full input sequence.
+
+Anagram vectors can also be computed on n-grams, rather than single words/tokens.
 
 Dependencies
 --------------
@@ -94,6 +101,8 @@ optional arguments:
                         length for this to have any effect! (default: 3)
   -D MAXLD, --maxld MAXLD
                         Maximum levenshtein distance (default: 5)
+  -M MAXVD, --maxvd MAXVD
+                        Maximum vector distance (default: 5)
   -t MINFREQ, --minfreq MINFREQ
                         Minimum frequency threshold (occurrence count) in
                         background corpus (default: 1)
@@ -103,6 +112,9 @@ optional arguments:
                         the anagram vectors (default: 10)
   -b BEAMSIZE, --beamsize BEAMSIZE
                         Beamsize for the decoder (default: 100)
+  --maxdeleteratio MAXDELETERATIO
+                        Do not allow a word to lose more than this fraction of
+                        its letters (default: 0.34)
   --lexfreq LEXFREQ     Artificial frequency (occurrence count) for items in
                         the lexicon that are not in the background corpus
                         (default: 1)
@@ -121,20 +133,35 @@ optional arguments:
                         Correction Model weight for Language Model selection
                         (together with --lmweight) (default: 1)
   --correctscore CORRECTSCORE
-                        The score the a word must reach to be considered
-                        correct (default: 0.6)
+                        The score a word must reach to be marked correct prior
+                        to decoding (default: 0.6)
+  --correctfreq CORRECTFREQ
+                        The frequency a word must have for it to be marked
+                        correct prior to decoding (default: 200)
   --punctweight PUNCTWEIGHT
                         Punctuation character weight for anagram vector
                         representation (default: 1)
   --unkweight UNKWEIGHT
                         Unknown character weight for anagram vector
                         representation (default: 1)
-  --lmwin               Boost the scores of the LM selection just prior to
-                        output (default: False)
+  --ngramboost NGRAMBOOST
+                        Boost unigram candidates that are also predicted as
+                        part of larger ngrams, by the specified factor
+                        (default: 0.25)
+  -1, --simpledecoder   Use only unigrams in decoding (default: False)
+  --lmwin               Boost the scores of the LM selection (to 1.0) just
+                        prior to output (default: False)
   --locallm             Use a local LM to select a preferred candidate in each
                         candidate list instead of the LM integrated in the
                         decoder (default: False)
+  --blocksize BLOCKSIZE
+                        Block size: determines the amount of test tokens to
+                        process in one go (dimensions of the anavec test
+                        matrix), setting this helps reduce memory at the cost
+                        of speed (0 = unlimited) (default: 1000)
   --report              Output a full report (default: False)
   --json                Output JSON (default: False)
+  --tok                 Input is already tokenized (default: False)
   --noout               Do not output (default: True)
   -d, --debug
+
