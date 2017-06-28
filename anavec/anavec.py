@@ -38,6 +38,7 @@ class InputTokenState:
     INCORRECT = 2 #The input word is explicitly incorrect, it has to be corrected
     EOL = 4 #The input word is the end of the line
     PUNCTAIL = 8 #Token is trailing punctuation that was joined to the previous token in the original
+    EOB = 16 #The input word is the end of an input block (each block will have it's own matrix, preventing the need for one huge matrix)
 
 
 def compute_vector_distances(trainingdata, testdata):
@@ -283,7 +284,16 @@ class Corrector:
         timer(begintime)
         if self.args.debug: print("[DEBUG] TRAINING DATA DIMENSIONS: ", self.trainingdata.shape)
 
-    def correct(self, testtokens, mask=None):
+    def getblocks(self, testtokens, mask):
+        """Returns manageable blocks (precomputed by readinput()) from the data stream"""
+        begin = 0
+        for i, state in enumerate(mask):
+            if state & InputTokenState.EOB or i == len(mask) - 1:
+                yield testtokens[begin:i], mask[begin:i], begin
+                begin = i+1
+
+
+    def correct(self, testtokens, mask=None, block=None, blockoffset=None):
         """Correct the testtokens (a list of strings in a pseudo-tokenised representation)
 
         The optional mask parameter is an equally-sized sequence, corresponding to the testwords, that
@@ -295,184 +305,195 @@ class Corrector:
 
         if not mask:
             mask = [InputTokenState.CORRECTABLE for word in testtokens]
+            if mask:
+                mask[-1] |= InputTokenState.EOB  #end of block
 
-        if len(mask) != len(testtokens):
-            raise Exception("Supplied mask must be as long as the testtokens!")
+        if block is None:
+            #we are not in a block yet, divide the input into sizeable blocks and call ourselves for each:
+            for block_index, (block_testtokens, block_mask, block_offset) in enumerate(self.getblocks(testtokens, mask)):
+                for result in self.correct(block_testtokens, block_mask, block_index, block_offset):
+                    yield result
+        else:
+            #process the block
+            if len(mask) != len(testtokens):
+                raise ValueError("Supplied mask must be as long as the testtokens!")
+            elif len(testtokens) == 0:
+                raise ValueError("No testtokens specified! List may not be empty")
 
-        testpatterns = list(self.gettestpatterns(testtokens, mask))
+            testpatterns = list(self.gettestpatterns(testtokens, mask))
 
-        numtest = len(testpatterns)
-        print("Test set model size: ", numtest, file=sys.stderr)
+            numtest = len(testpatterns)
+            print("Test set model size: ", numtest, file=sys.stderr)
 
-        print("Building test vectors...", file=sys.stderr)
-        testdata = np.array( [ self.buildfeaturevector(testword) for testword, _,_,_ in testpatterns] )
-        if self.args.debug: print("[DEBUG] TEST DATA: ", testdata)
+            print("Building test vectors...", file=sys.stderr)
+            testdata = np.array( [ self.buildfeaturevector(testword) for testword, _,_,_ in testpatterns] )
+            if self.args.debug: print("[DEBUG] TEST DATA: ", testdata)
 
-        print("Computing vector distances between test and trainingdata...", file=sys.stderr)
-        begintime = time.time()
-        distancematrix, bestindexmatrix = compute_vector_distances(self.trainingdata, testdata)
-        timer(begintime)
+            print("Computing vector distances between test and trainingdata...", file=sys.stderr)
+            begintime = time.time()
+            distancematrix, bestindexmatrix = compute_vector_distances(self.trainingdata, testdata)
+            timer(begintime)
 
-        print("Collecting matching anagrams...", file=sys.stderr)
-        begintime = time.time()
-        matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
-        for i, ((testword, state, index, length), bestindices) in enumerate(zip(testpatterns, bestindexmatrix)):
-            #- testword is the actual text (str) of the pattern, usually a word
-            #- index is the index in the original testwords
-            #- length is the length of the pattern (in tokens)
+            print("Collecting matching anagrams...", file=sys.stderr)
+            begintime = time.time()
+            matchinganagramhashes = defaultdict(set) #map of matching anagram hash to test words that yield it as a match
+            for i, ((testword, state, index, length), bestindices) in enumerate(zip(testpatterns, bestindexmatrix)):
+                #- testword is the actual text (str) of the pattern, usually a word
+                #- index is the index in the original testwords
+                #- length is the length of the pattern (in tokens)
 
-            #distances contains the distances between testword and all training instances
-            #we extract the top k **distances**:
-            matchingdistances = set()
-            if self.args.maxdeleteratio > 0: testlength = np.sum(testdata[i])
-            for trainindex in bestindices:
-                distance = distancematrix[i][trainindex]
-                matchingdistances.add(distance)
-                if len(matchingdistances) > self.args.neighbours or distance > self.args.maxvd:
-                    break
-                trainlength = np.sum(self.trainingdata[trainindex])
-                if abs(testlength-trainlength) > self.args.maxld:
-                    #discard patterns that will exceed the max LD (quick heuristic approach without computing full LD)
-                    continue
-                if self.args.maxdeleteratio > 0:
-                    if testlength > trainlength and testlength - trainlength > round(self.args.maxdeleteratio*testlength):
-                        #too many deletions, we do not consider this anagram
+                #distances contains the distances between testword and all training instances
+                #we extract the top k **distances**:
+                matchingdistances = set()
+                if self.args.maxdeleteratio > 0: testlength = np.sum(testdata[i])
+                for trainindex in bestindices:
+                    distance = distancematrix[i][trainindex]
+                    matchingdistances.add(distance)
+                    if len(matchingdistances) > self.args.neighbours or distance > self.args.maxvd:
+                        break
+                    trainlength = np.sum(self.trainingdata[trainindex])
+                    if abs(testlength-trainlength) > self.args.maxld:
+                        #discard patterns that will exceed the max LD (quick heuristic approach without computing full LD)
                         continue
-                h = anahash_fromvector(self.trainingdata[trainindex])
-                matchinganagramhashes[h].add((testword, distance))
-        timer(begintime)
+                    if self.args.maxdeleteratio > 0:
+                        if testlength > trainlength and testlength - trainlength > round(self.args.maxdeleteratio*testlength):
+                            #too many deletions, we do not consider this anagram
+                            continue
+                    h = anahash_fromvector(self.trainingdata[trainindex])
+                    matchinganagramhashes[h].add((testword, distance))
+            timer(begintime)
 
-        print("Resolving anagram hashes to candidates...", file=sys.stderr)
-        begintime = time.time()
-        candidates = defaultdict(list) #maps test words to  candidates (str => [str])
-        for pattern in self.trainingpatterns():
-            trainingword = pattern.tostring(self.classdecoder)
-            h = self.anahash(trainingword)
-            if h in matchinganagramhashes:
-                for testword, vectordistance in matchinganagramhashes[h]:
-                    candidates[testword].append((trainingword,vectordistance))
-        timer(begintime)
+            print("Resolving anagram hashes to candidates...", file=sys.stderr)
+            begintime = time.time()
+            candidates = defaultdict(list) #maps test words to  candidates (str => [str])
+            for pattern in self.trainingpatterns():
+                trainingword = pattern.tostring(self.classdecoder)
+                h = self.anahash(trainingword)
+                if h in matchinganagramhashes:
+                    for testword, vectordistance in matchinganagramhashes[h]:
+                        candidates[testword].append((trainingword,vectordistance))
+            timer(begintime)
 
-        print("Scoring and ranking candidates...", file=sys.stderr)
-        begintime = time.time()
+            print("Scoring and ranking candidates...", file=sys.stderr)
+            begintime = time.time()
 
-        #We collect all candidates in a big candidate tree, where a list of candidates is stored for each test index, and each possible token length
-        candidatetree = {} #index number => length => [candidates]
+            #We collect all candidates in a big candidate tree, where a list of candidates is stored for each test index, and each possible token length
+            candidatetree = {} #index number => length => [candidates]
 
 
-        for testword, state, index, length in testpatterns:
-            if not index in candidatetree: candidatetree[index] = defaultdict(list)
-            if state & InputTokenState.CORRECT:
-                #Word is already correct and not to be tested, just look up some data and copy to output
-                freqtuple = self.getfrequencytuple(testword)
-                assert length == 1
-                candidatetree[index][length].append(
-                    AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned': False, 'overlaps': False})
-                )
-            else:
-                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning (" + str(len(candidates[testword])) + ")", list(sorted(candidates[testword], key=lambda x: x[1])) ,file=sys.stderr)
-                #we have multiple candidates per testword; we are going to use four sources to rank:
-                #   1) the vector distance
-                #   2) the levensthein distance
-                #   3) the frequency in the background corpus
-                #   4) the presence in lexicon or not
-                candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), self.getfrequencytuple(candidate)) for candidate, vdistance in candidates[testword] ]
-                #prune candidates below thresholds:
-                candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= self.args.maxld and freqtuple[0] >= self.args.minfreq ]
-                if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning (" + str(len(candidates_extended))+ ")", list(sorted(candidates_extended, key=lambda x: (x[2],x[1],x[3]))),file=sys.stderr)
-                if state & InputTokenState.INCORRECT:
-                    #The word is explicitly marked incorrect, any correction candidate that is equal to the input word will be pruned
-                    candidates_extended = [ (candidate, vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance,freq, inlexicon  in candidates_extended if candidate != testword ]
-                result_candidates = []
-                if candidates_extended:
-                    maxfreq = max(( freq for _, _, _, freq, _  in candidates_extended ))
-
-                    #compute a normalized confidence score including all components according to their weights:
-                    candidates_confidencescored = [ ( candidate, (
-                        self.args.vdweight * (1/(vdistance+1)) + \
-                        self.args.ldweight * (1/(ldistance+1)) + \
-                        self.args.freqweight * (freq/maxfreq)**0.25 + \
-                        (self.args.lexweight if inlexicon else 0)
-                        )
-                    ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
-
-                    #collect candidates in candidate tree
-                    #we transform the confidence score into a likelihood P(correction|original) by normalising over all candidates and taking into account their rank number
-                    candidates_confidencescored.sort(key=lambda x: -1*x[1]) #sort based on confidence score, descending
-                    candidates_confidencescored = candidates_confidencescored[:self.args.candidates] #prune candidates below the cut-off threshold
-                    confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
-                    for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
-                        logprob = math.log10(score)
-                        correct = i == 0 and candidate == testword and score >= self.args.correctscore and (inlexicon or not self.args.lexicon) and freq > self.args.correctfreq
-                        candidatetree[index][length].append(
-                            AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False, 'overlaps': False})
-                        )
-        timer(begintime)
-
-        #Add correct 'candidates' for words that need no further correction:
-        for index, (testword, state) in enumerate(zip(testtokens, mask)):
-            if state & InputTokenState.CORRECT:
+            for testword, state, index, length in testpatterns:
                 if not index in candidatetree: candidatetree[index] = defaultdict(list)
-                #Word is already correct and not to be tested, just look up some data and copy to output
-                freqtuple = self.getfrequencytuple(testword)
-                if len(candidatetree[index][1]) == 0:
-                    candidatetree[index][1].append(
-                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned':False, 'overlaps': False})
+                if state & InputTokenState.CORRECT:
+                    #Word is already correct and not to be tested, just look up some data and copy to output
+                    freqtuple = self.getfrequencytuple(testword)
+                    assert length == 1
+                    candidatetree[index][length].append(
+                        AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned': False, 'overlaps': False})
                     )
+                else:
+                    if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' prior to pruning (" + str(len(candidates[testword])) + ")", list(sorted(candidates[testword], key=lambda x: x[1])) ,file=sys.stderr)
+                    #we have multiple candidates per testword; we are going to use four sources to rank:
+                    #   1) the vector distance
+                    #   2) the levensthein distance
+                    #   3) the frequency in the background corpus
+                    #   4) the presence in lexicon or not
+                    candidates_extended = [ (candidate, vdistance, Levenshtein.distance(testword, candidate), self.getfrequencytuple(candidate)) for candidate, vdistance in candidates[testword] ]
+                    #prune candidates below thresholds:
+                    candidates_extended = [ (candidate, vdistance, ldistance, freqtuple[0], freqtuple[1]) for candidate, vdistance, ldistance,freqtuple in candidates_extended if ldistance <= self.args.maxld and freqtuple[0] >= self.args.minfreq ]
+                    if self.args.debug: print("[DEBUG] Candidates for '" + testword + "' after frequency & LD pruning (" + str(len(candidates_extended))+ ")", list(sorted(candidates_extended, key=lambda x: (x[2],x[1],x[3]))),file=sys.stderr)
+                    if state & InputTokenState.INCORRECT:
+                        #The word is explicitly marked incorrect, any correction candidate that is equal to the input word will be pruned
+                        candidates_extended = [ (candidate, vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance,freq, inlexicon  in candidates_extended if candidate != testword ]
+                    result_candidates = []
+                    if candidates_extended:
+                        maxfreq = max(( freq for _, _, _, freq, _  in candidates_extended ))
+
+                        #compute a normalized confidence score including all components according to their weights:
+                        candidates_confidencescored = [ ( candidate, (
+                            self.args.vdweight * (1/(vdistance+1)) + \
+                            self.args.ldweight * (1/(ldistance+1)) + \
+                            self.args.freqweight * (freq/maxfreq)**0.25 + \
+                            (self.args.lexweight if inlexicon else 0)
+                            )
+                        ,vdistance, ldistance, freq, inlexicon) for candidate, vdistance, ldistance, freq, inlexicon in candidates_extended ]
+
+                        #collect candidates in candidate tree
+                        #we transform the confidence score into a likelihood P(correction|original) by normalising over all candidates and taking into account their rank number
+                        candidates_confidencescored.sort(key=lambda x: -1*x[1]) #sort based on confidence score, descending
+                        candidates_confidencescored = candidates_confidencescored[:self.args.candidates] #prune candidates below the cut-off threshold
+                        confidencesum = sum( ( score for _,score,_,_,_,_ in candidates_confidencescored) )
+                        for i, (candidate, score, vdistance, ldistance,freq, inlexicon) in enumerate(sorted(candidates_confidencescored, key=lambda x: -1 * x[1])):
+                            logprob = math.log10(score)
+                            correct = i == 0 and candidate == testword and score >= self.args.correctscore and (inlexicon or not self.args.lexicon) and freq > self.args.correctfreq
+                            candidatetree[index][length].append(
+                                AttributeDict({'text': candidate,'logprob': logprob, 'score': score, 'vdistance': vdistance, 'ldistance': ldistance, 'freq': freq, 'inlexicon': inlexicon, 'error': candidate != testword, 'correct': correct, 'lmselect': False, 'pruned': False, 'overlaps': False})
+                            )
+            timer(begintime)
+
+            #Add correct 'candidates' for words that need no further correction:
+            for index, (testword, state) in enumerate(zip(testtokens, mask)):
+                if state & InputTokenState.CORRECT:
+                    if not index in candidatetree: candidatetree[index] = defaultdict(list)
+                    #Word is already correct and not to be tested, just look up some data and copy to output
+                    freqtuple = self.getfrequencytuple(testword)
+                    if len(candidatetree[index][1]) == 0:
+                        candidatetree[index][1].append(
+                            AttributeDict({'text':testword,'logprob': 0, 'score': 1.0, 'ldistance': 0, 'vdistance': 0.0, 'freq': freqtuple[0], 'inlexicon': freqtuple[1], 'error': False, 'correct':1, 'lmselect':bool(self.args.lm), 'pruned':False, 'overlaps': False})
+                        )
 
 
-        #boost unigram candidates that are also found in solutions of larger ngrams
-        if self.args.ngramboost:
+            #boost unigram candidates that are also found in solutions of larger ngrams
+            if self.args.ngramboost:
+                for index in sorted(candidatetree):
+                    for length in candidatetree[index]:
+                        if length > 1:
+                            for candidate in candidatetree[index][length]:
+                                words = candidate.text.split(' ')
+                                if len(words) == length:
+                                    for offset, word in enumerate(words):
+                                        if 1 in candidatetree[index+offset]:
+                                            for candidate2 in candidatetree[index+offset][1]:
+                                                if not candidate2.overlaps and candidate2.text == word:
+                                                    #candidate overlaps
+                                                    if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once): ", file=sys.stderr)
+                                                    candidate2.logprob *= self.args.ngramboost
+                                                    candidate2.overlaps = True
+
+
+            #Prune candidates that conflict (overlap) with correct candidates
             for index in sorted(candidatetree):
-                for length in candidatetree[index]:
-                    if length > 1:
-                        for candidate in candidatetree[index][length]:
-                            words = candidate.text.split(' ')
-                            if len(words) == length:
-                                for offset, word in enumerate(words):
-                                    if 1 in candidatetree[index+offset]:
-                                        for candidate2 in candidatetree[index+offset][1]:
-                                            if not candidate2.overlaps and candidate2.text == word:
-                                                #candidate overlaps
-                                                if self.args.debug: print("[DEBUG] Overlap between " + candidate2.text + " (@" + str(index+offset)+ ") and " + candidate.text + " (@" + str(index)+":" + str(length)+"), boosting the former (only once): ", file=sys.stderr)
-                                                candidate2.logprob *= self.args.ngramboost
-                                                candidate2.overlaps = True
-
-
-        #Prune candidates that conflict (overlap) with correct candidates
-        for index in sorted(candidatetree):
-            for length in sorted(candidatetree[index]):
-                if length > 1 and not candidatetree[index][length][0].correct:
-                    overlapswithcorrect = False
-                    for j in range(index, index+length):
-                        for l in range(1,length):
-                            try:
-                                if candidatetree[j][l][0].correct:
-                                    overlapswithcorrect=True
-                                    break
-                            except (KeyError, IndexError):
-                                pass
-                    if overlapswithcorrect:
-                        for candidate in candidatetree[index][length]:
-                            candidate.pruned = True
+                for length in sorted(candidatetree[index]):
+                    if length > 1 and not candidatetree[index][length][0].correct:
+                        overlapswithcorrect = False
+                        for j in range(index, index+length):
+                            for l in range(1,length):
+                                try:
+                                    if candidatetree[j][l][0].correct:
+                                        overlapswithcorrect=True
+                                        break
+                                except (KeyError, IndexError):
+                                    pass
+                        if overlapswithcorrect:
+                            for candidate in candidatetree[index][length]:
+                                candidate.pruned = True
 
 
 
-        if self.args.locallm:
-            #Alternative LM selection method, if this is enabled the LM in the decoder later will be disabled
-            self.applylocallm(candidatetree, testtokens)
+            if self.args.locallm:
+                #Alternative LM selection method, if this is enabled the LM in the decoder later will be disabled
+                self.applylocallm(candidatetree, testtokens)
 
-        begin = 0
-        for i, state in enumerate(mask):
-            if state & InputTokenState.EOL or i == len(mask) - 1:
-                begintime = time.time()
-                decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize, offset=begin, length=(i-begin)+1)
-                topresults = []
-                for hyp in decoder.decode(self.args.topn):
-                    topresults.append(hyp)
-                timer(begintime)
-                yield AttributeDict({'offset': begin,'top':topresults, 'candidatetree': { k-begin:v for k, v in candidatetree.items() if k >=begin and k<=i}, 'testtokens': decoder.testwords, 'mask': decoder.mask  }) #contains the top n best results
-                begin = i + 1
+            begin = 0
+            for i, state in enumerate(mask):
+                if state & InputTokenState.EOL or i == len(mask) - 1:
+                    begintime = time.time()
+                    decoder = StackDecoder(self, testtokens, mask, candidatetree, self.args.beamsize, offset=begin, length=(i-begin)+1)
+                    topresults = []
+                    for hyp in decoder.decode(self.args.topn):
+                        topresults.append(hyp)
+                    timer(begintime)
+                    yield AttributeDict({'offset': blockoffset+begin,'top':topresults, 'candidatetree': { k-begin:v for k, v in candidatetree.items() if k >=begin and k<=i}, 'testtokens': decoder.testwords, 'mask': decoder.mask  }) #contains the top n best results
+                    begin = i + 1
 
 
 
@@ -867,7 +888,7 @@ class CorrectionHypothesis:
         hyp = self
         s = ""
         while hyp is not None and hyp.candidate is not None:
-            s = hyp.candidate.text + " "
+            s = hyp.candidate.text + " " + s
             hyp = hyp.parent
         return s.strip()
 
@@ -976,6 +997,7 @@ def setup_argparser(parser):
     parser.add_argument('-1','--simpledecoder',action='store_true', help="Use only unigrams in decoding")
     parser.add_argument('--lmwin',action='store_true', help="Boost the scores of the LM selection (to 1.0) just prior to output")
     parser.add_argument('--locallm',action='store_true', help="Use a local LM to select a preferred candidate in each candidate list instead of the LM integrated in the decoder")
+    parser.add_argument('--blocksize',type=int, action='store', help="Block size: determines the amount of test types to process in one go (dimensions of the anavec test matrix), setting this helps reduce memory at the cost of speed (0 = unlimited)",default=0)
     parser.add_argument('--report',action='store_true', help="Output a full report")
     parser.add_argument('--json',action='store_true', help="Output JSON")
     parser.add_argument('--tok',action='store_true', help="Input is already tokenized")
@@ -983,15 +1005,17 @@ def setup_argparser(parser):
     parser.add_argument('-d', '--debug',action='store_true')
 
 
-def readinput(lines, istokenized):
+def readinput(lines, istokenized, blocksize=0):
     testwords = []
     mask = []
     positions = []
+    wordtypes = set()
     for line in lines:
         if not istokenized:
             tokenizedline = pretokenizer(line)
             for token, begin, end, punctail in tokenizedline:
                 testwords.append( token )
+                if blocksize > 0: wordtypes.add(token)
                 if any( c.isalpha() for c in token):
                     mask.append( InputTokenState.CORRECTABLE )
                 else:
@@ -1002,12 +1026,19 @@ def readinput(lines, istokenized):
                     testwords.append( punctail )
                     mask.append( InputTokenState.CORRECT | InputTokenState.PUNCTAIL )
                     positions.append( (None,None,punctail) )
-            mask[-1] |= InputTokenState.EOL
+                    if blocksize > 0: wordtypes.add(punctail)
         else:
             tokens  = [ w.strip() for w in line.split(' ') if w.strip() ]
+            if blocksize > 0:
+                for token in tokens:
+                    wordtypes.add(token)
             testwords += tokens
             mask += [ InputTokenState.CORRECTABLE ] * len(tokens)
-            mask[-1] |= InputTokenState.EOL
+        mask[-1] |= InputTokenState.EOL
+        if blocksize > 0:
+            if len(wordtypes) >= blocksize:
+                mask[-1] |= InputTokenState.EOB
+                wordtypes = set()
     return testwords, mask, positions
 
 def main():
@@ -1018,7 +1049,7 @@ def main():
 
     print("Reading from standard input (if interactively invoked, type ctrl-D when done):",file=sys.stderr)
 
-    testwords, mask, _  = readinput(sys.stdin.readlines(), args.tok)
+    testwords, mask, _  = readinput(sys.stdin.readlines(), args.tok, args.blocksize)
 
     if args.json:
         print("[")
