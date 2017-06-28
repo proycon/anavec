@@ -867,10 +867,9 @@ class CorrectionHypothesis:
         hyp = self
         s = ""
         while hyp is not None and hyp.candidate is not None:
-            if s: s += " "
-            s += hyp.candidate.text
+            s = hyp.candidate.text + " "
             hyp = hyp.parent
-        return s
+        return s.strip()
 
     def __lt__(self, other):
         return self.logprob < other.logprob
