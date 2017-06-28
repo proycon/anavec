@@ -32,14 +32,18 @@ def readpositiondata(positionfile):
     return positiondata
 
 
-def setbreakpoints(testtokens, mask, eager=False):
+def setbreakpoints(testtokens, mask, blocksize, eager=False):
     """input is all on one line, this will overwhelm the decoder, split into 'lines' at points where punctuation likely indicates a sentence ending"""
     begin = 0
+    blockbegin = 0
     for i, (testtoken, state) in enumerate(zip(testtokens, mask)):
         if testtoken == '.' or (eager and testtoken[-1] == '.' and i+1 < len(testtokens) and mask[i+1] & InputTokenState.CORRECT):
             if i - begin >= 6 and i+1 < len(testtokens) and testtokens[i+1][0].isalpha() and testtokens[i+1][0] == testtokens[i+1][0].upper():
                 mask[i] |= InputTokenState.EOL
                 begin = i
+                if i - blockbegin >= blocksize:
+                    mask[i] |= InputTokenState.EOB
+                    blockbegin = i
 
 def process(corrector, testfiles, args):
     icdar_results = {} #results as per challenge specification
@@ -62,7 +66,7 @@ def process(corrector, testfiles, args):
         testtokens, mask, positions = readinput(lines, False, args.blocksize)
 
         #input is all on one line, this will overwhelm the decoder, split into 'lines' at points where punctuation likely indicates a sentence ending
-        setbreakpoints(testtokens, mask)
+        setbreakpoints(testtokens, mask, args.blocksize, eager=True)
 
         if args.positionfile:
             if testfile not in positiondata:
