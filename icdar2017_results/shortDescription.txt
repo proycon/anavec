@@ -1,0 +1,18 @@
+Anavec
+    https://github.com/proycon/anavec
+    Maarten van Gompel & Martin Reynaert
+    Centre for Language and Speech Technology
+    Radboud University Nijmegen
+
+Anavec is a spelling correction system that stores words or ngrams from a lexicon and background corpus as **anagram
+vectors**, an unordered bag-of-characters model. Words to be corrected are similarly represented as anagram vectors and
+matched with the training data to find the closest neigbours. Anagram matches are resolved to actual correction
+candidates, which are in turn scored according to the Vector distance, Levenshtein distance, frequency in background
+corpus, and presence in lexicon. Finally, a stack decoder algorithm (a beam search) incorporating also a Language Model
+component for context sensitivity, selects the most likely correction candidates given an input sequence.
+
+We trained this system with little to no regard for historical spelling to keep things simple; using Wikipedia as the
+background corpus and the lexicon from Aspell. Our system does both detection and correction, but we focussed mainly on
+task 2. For task 1 we only participate for French as the English version has too many false positives as it is not aware
+of historical variants.
+
