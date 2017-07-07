@@ -6,10 +6,10 @@ Introduction
 
 Anavec is a proof-of-concept spelling correction/normalisation system inspired by TICCL  [Reynaert, 2010] and its use of anagram
 hashing. Words in a lexicon and background corpus are stored as **anagram vectors**, i.e. an unordered bag-of-characters
-model. These are gathered in a matrix and constitutes the initial training data.
+model. These are gathered in a matrix and constitute the initial training data.
 
 At testing, words to be corrected are similarly represented as anagram vectors, and gathered in a matrix. Subsequently,
-squared pairwise distances are computed between the two matrices, this acts as simpler heuristic approach to
+squared pairwise distances are computed between the two matrices, this acts as a simpler heuristic approach to
 Levenshtein/edit distance as it can be more efficiently computed. The k-nearest neighbours are retrieved for each test
 instance, these represent anagrams and are in turn resolved to all possible correction candidates.
 
@@ -20,7 +20,7 @@ The correction candidates are then ranked according to four components:
 * The frequency of the candidate in the background corpus
 * The presence or absence of the candidate in the lexicon
 
-These components are normalized and summed to form a score for each correction cancidate. Each of the four terms is
+These components are normalized and summed to form a score for each correction candidate. Each of the four terms is
 parametrised by a weight, determining the share it takes in the whole score computation.
 
 This is all context insensitive, but a Language Model can be enabled for context sensitivity. The Language Model will
@@ -64,7 +64,7 @@ The KenLM dependency for LM support needs to be installed separately at it is no
 * ``pip3 install https://github.com/kpu/kenlm/archive/master.zip``
 
 Note that ``pip3`` refers to the Python 3 version of ``pip``, it may be available simply as ``pip`` on your system, especially if
-you are using a Python Virtual Environment, which we always recommended.
+you are using a Python Virtual Environment, which we always recommend.
 
 License
 ----------
